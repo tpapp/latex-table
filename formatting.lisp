@@ -54,3 +54,4 @@ Example: (make-simple-formatter 2 '((nil \"n/a\")))
 	     (bind (((:values int frac) (funcall float-formatter value)))
 	       (list :aligned int frac)))
 	    (t (list :center (format nil "~a" value))))))))
+

@@ -9,6 +9,5 @@
   :license "LLGPL"
   :serial t
   :components ((:file "package")
-	       (:file "formatting" :depends-on ("package"))
-	       (:file "latex-table" :depends-on ("formatting")))
+	       (:file "latex-table"))
   :depends-on (:iterate :metabang-bind :cl-utilities))
