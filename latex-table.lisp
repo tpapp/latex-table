@@ -270,7 +270,7 @@ row-labels and column-labels can be either lists or vectors.
       (dotimes (j ncol)
 	(setf (aref m (1+ i) (1+ j))
 	      (format-cell (aref matrix i j) special-values
-			   (aref significant-digits i)))))
+			   (aref significant-digits j)))))
     ;; output
     (raw-tabular stream m (concatenate 'vector (vector column-label-alignment)
 				       coltypes)
