@@ -7,7 +7,7 @@
   (list :multicolumn cols pos string))
 
 (defun aligned (x y)
-  (list :aligned x y))
+  (list :align x y))
 
 (defun raw-tabular (stream matrix coltypes vlines hlines &key (position :top)
 		    (environment "tabular"))
@@ -15,18 +15,18 @@
   "Output matrix in a latex tabular environment (you can also specify
 another environment).  Matrix can have the following element types:
 
- string -- aligned according to coltypes (centered for :aligned column type)
+ string -- aligned according to coltypes (centered for :align column type)
  (:left string) -- flushed left
  (:right string) -- flushed right
  (:center string) -- centered
- (:aligned string string) -- aligned pair
- (:aligned string) -- aligned with second part missing
+ (:align string string) -- aligned pair
+ (:align string) -- aligned with second part missing
  (:multicolumn cols pos string) -- LaTeX multicolumn, subsequent cols-1 elements
     are ignored
 
 The following column types are
-possible: :left, :right, :center, :aligned.  Aligned pairs can only be
-accommodated in a column of type :aligned.
+possible: :left, :right, :center, :align.  Aligned pairs can only be
+accommodated in a column of type :align.
 
 vlines and hlines need to be vectors one element longer than the
 number of columns/rows, respectively.  They can contain small
@@ -36,9 +36,8 @@ and characters (#\|, etc).  The latter two are not checked for
 correctness in LaTeX.
 
 position corresponds to LaTeX tabular's pos argument for vertical
-position, and can be either :top or :bottom.
-"
-  ;; Implementation notes: a column of type :aligned is actually two
+position, and can be either :top or :bottom."
+  ;; Implementation notes: a column of type :align is actually two
   ;; columns, separated by @{}.  This is very useful for aligning
   ;; numbers on the decimal dot and similar arrangements, and thus I
   ;; feel it is worth dealing with the extra complexity here so that
@@ -90,7 +89,7 @@ If the string is nonempty, it is closed with separator."
 		  (:left "l")
 		  (:right "r")
 		  (:center "c")
-		  (:aligned "r@{}l"))))
+		  (:align "r@{}l"))))
       (format stream "~a}~%" (vline (aref vlines (1- (length vlines)))))
       ;; matrix
       (dotimes (i nrow)
@@ -109,41 +108,41 @@ If the string is nonempty, it is closed with separator."
 		      ;; here we verify correctness of all forms, and
 		      ;; separate type from parameters
 		      (if (atom cell)
-			;; an atom has type :any
-			(values :any cell)
-			;; identify various keywords
-			(let ((type (car cell))
-			      (params (cdr cell)))
-			  (ecase type
-			    ;; one of the aligned types
-			    ((:left :right :center)
-			     (bind (((x) params))
-			       (when (symbolp x)
-				 (error "~a is a symbol" x))
-			       (values type x)))
-			    ;; aligned pair
-			    (:aligned
-			     (bind (((a b) params))
-			       (values :aligned a b)))
-			    ;; multicolumn
-			    (:multicolumn
-			     (bind (((col pos a) params))
-			       ;; we skip the next (1- col) cells
-			       (setf multicol-countdown (1- col))
-			       ;; calculate the actual number of
-			       ;; columns seen by LaTeX, taking
-			       ;; :aligned columns into account
-			       (let ((total-col
-				      (iter
-					(for i :from 0 :below col)
-					(for coltype :in-vector coltypes :from j)
-					(summing (if (eq coltype :aligned) 2 1)))))
-				 (values :multicolumn total-col pos a)))))))))
+                          ;; an atom has type :any
+                          (values :any cell)
+                          ;; identify various keywords
+                          (let ((type (car cell))
+                                (params (cdr cell)))
+                            (ecase type
+                              ;; one of the aligned types
+                              ((:left :right :center)
+                                 (bind (((x) params))
+                                   (when (symbolp x)
+                                     (error "~a is a symbol" x))
+                                   (values type x)))
+                              ;; aligned pair
+                              (:align
+                                 (bind (((a b) params))
+                                   (values :align a b)))
+                              ;; multicolumn
+                              (:multicolumn
+                                 (bind (((col pos a) params))
+                                   ;; we skip the next (1- col) cells
+                                   (setf multicol-countdown (1- col))
+                                   ;; calculate the actual number of
+                                   ;; columns seen by LaTeX, taking
+                                   ;; :align columns into account
+                                   (let ((total-col
+                                          (iter
+                                            (for i :from 0 :below col)
+                                            (for coltype :in-vector coltypes :from j)
+                                            (summing (if (eq coltype :align) 2 1)))))
+                                     (values :multicolumn total-col pos a)))))))))
 		;; output cell to stream
 		(ecase coltype
-		  (:aligned
+		  (:align
 		   (ecase type
-		     (:aligned		; aligned pair
+		     (:align		; aligned pair
 		      (format stream "~a & ~a" first second))
 		     (:multicolumn	; have already accounted for
 					; extra columns above
@@ -162,17 +161,16 @@ If the string is nonempty, it is closed with separator."
 			  (multicolumn 1 type first)))
 		     (:multicolumn
 		      (multicolumn first second third))
-		     (:aligned
-		      (error "can't put an aligned cell in a ~
-non-aligned column")))))))
-	  ;; close with & or \\
-	  (if (= (1- ncol) j)
-	      ;; technically, a nonzero multicol-countdown would lead
-	      ;; to malformed LaTeX code here, but that can never
-	      ;; ("should not") occur
-	      (format stream "\\\\~%")
-	      (when (zerop multicol-countdown)
-		(format stream " & "))))))
+		     (:align		; aligned pair, just center
+		      (multicolumn 1 :center (concatenate 'string first second))))))))
+            ;; close with & or \\
+            (if (= (1- ncol) j)
+                ;; technically, a nonzero multicol-countdown would lead
+                ;; to malformed LaTeX code here, but that can never
+                ;; ("should not") occur
+                (format stream "\\\\~%")
+                (when (zerop multicol-countdown)
+                  (format stream " & "))))))
       ;; hline spec, for last row
       (hline (aref hlines nrow) #\newline)
       ;; closing
@@ -248,83 +246,55 @@ Examples:
 	 lines)))
     (t (error "line-type-pairs has to be a vector or a proper list"))))
 
-(defun labeled-matrix (stream matrix column-labels row-labels &key
-		       (significant-digits 3) (special-values '((nil "n/a")))
-		       (hlines '(1 1)) (vlines '(1 1)) (corner-cell ""))
+(defun labeled-matrix (stream matrix column-labels row-labels &key 
+                       format-options (hlines '(1 1)) (vlines '(1 1))
+                       (corner-cell ""))
   "Output matrix as a simple table, with given row and column labels.
 The elements of matrix are expected to be numeric, and formatted using
-significant-digits.  Exceptions are given in special values, if an
-element is equal to one of these, the corresponding string will appear
-in the table.
-
-row-labels and column-labels can be either lists or vectors.
-"
+FORMAT-OPTIONS.  ROW-LABELS and COLUMN-LABELS are sequences."
   (bind (((nrow ncol) (array-dimensions matrix))
 	 (m (make-array (list (1+ nrow) (1+ ncol))))
 	 (hlines (lines-to-vector (1+ nrow) hlines))
 	 (vlines (lines-to-vector (1+ ncol) vlines))
- 	 (coltypes (make-array (1+ ncol) :initial-element :aligned))
-	 (simple-formatters (cond
-			      ((vectorp significant-digits)
-			       (assert (= (length significant-digits) ncol))
-			       (map 'vector 
-				    (lambda (sd)
-				      (make-simple-formatter 
-				       sd
-				       special-values))
-				    significant-digits))
-			      ((integerp significant-digits)
-			       (make-array ncol
-					   :initial-element
-					   (make-simple-formatter 
-					    significant-digits
-					    special-values)))
-			      (t (error "significant-digits needs to
-			      be a vector or an a vector of
-			      integers."))))
+ 	 (coltypes (make-array (1+ ncol) :initial-element :align))
+         (format-options (make-format-options format-options ncol))
 	 (row-labels (coerce row-labels 'vector))
 	 (column-labels (coerce column-labels 'vector)))
     (setf (aref coltypes 0) :left)
     ;; corner, row and column labels
-    (dotimes (i nrow)
-      (setf (aref m (1+ i) 0) (aref row-labels i)))
-    (dotimes (j ncol)
-      (setf (aref m 0 (1+ j)) (aref column-labels j)))
-    (setf (aref m 0 0) corner-cell)
-    (setf (aref coltypes 0) :left)
+    (setf (sub m (si 1 0) 0) row-labels
+          (sub m 0 (si 1 0)) column-labels
+          (aref m 0 0) corner-cell
+          (aref coltypes 0) :left)
     ;; cells
     (dotimes (i nrow)
       (dotimes (j ncol)
 	(setf (aref m (1+ i) (1+ j))
-	      (funcall (aref simple-formatters j) (aref matrix i j)))))
+              (format-value (aref matrix i j) (aref format-options j)))))
     ;; output
     (raw-tabular stream m coltypes vlines hlines)
-    (values)))
+    (values))
 
-(defun labeled-vector-horizontal (stream vector labels &key
-				  (significant-digits 3) 
-				  (special-values '((nil "n/a")))
-				  (hlines (vector 0 1 0))
-				  (vlines '(1 1)))
-  "Output vector as a horizontal table."
-  (let* ((vector (coerce vector 'vector))
-	 (labels (coerce labels 'vector))
-	 (n (length vector)))
-    (assert (= n (length labels)))
-    (let* ((m (make-array (list 2 n)))
-	   (vlines (lines-to-vector n vlines))
-	   (simple-formatter (make-simple-formatter significant-digits
-						    special-values))
-	   (coltypes (make-array n :initial-element :aligned)))
-      (dotimes (i n)
-	(setf (aref m 0 i) (aref labels i)
-	      (aref m 1 i) (funcall simple-formatter (aref vector i))))
-      (raw-tabular stream m coltypes vlines hlines))))
+  (defun labeled-vector-horizontal (stream vector labels &key
+                                    format-options
+                                    (hlines (vector 0 1 0))
+                                    vlines)
+    "Output vector as a horizontal table."
+    (let* ((vector (coerce vector 'vector))
+           (labels (coerce labels 'vector))
+           (n (length vector)))
+      (assert (= n (length labels)))
+      (let* ((m (make-array (list 2 n)))
+             (vlines (lines-to-vector n vlines))
+             (format-options (make-format-options format-options n))
+             (coltypes (make-array n :initial-element :align)))
+        (setf (sub m 0 t) labels)
+        (setf (sub m 1 t) (map 'vector #'format-value vector format-options))
+        (raw-tabular stream m coltypes vlines hlines)))))
 
 (defun labeled-vector-vertical (stream vector labels &key
-				(significant-digits 3)
-				(special-values '((nil "n/a")))
-				(hlines '(1 1))
+                                format-options
+				hlines
 				(vlines (vector 0 1 0)))
   "Output vector as a vertical table."
   (let* ((vector (coerce vector 'vector))
@@ -333,17 +303,16 @@ row-labels and column-labels can be either lists or vectors.
     (assert (= n (length labels)))
     (let* ((m (make-array (list n 2)))
 	   (hlines (lines-to-vector n hlines))
-	   (simple-formatter (make-simple-formatter significant-digits
-						    special-values))
-	   (coltypes (make-array 2 :initial-element :aligned)))
-      (dotimes (i n)
-	(setf (aref m i 0) (aref labels i)
-	      (aref m i 1) (funcall simple-formatter (aref vector i))))
+           (format-options (make-format-options format-options nil))
+	   (coltypes (make-array 2 :initial-element :align)))
+      (setf (sub m t 0) labels)
+      (setf (sub m t 1) (map 'vector (lambda (v) (format-value v format-options))
+                             vector))
       (raw-tabular stream m coltypes vlines hlines))))
 
 (defmacro with-table ((stream &key caption label (placement "htbp")) &body body)
-  "Put a table environment (with optional caption, label and
-placement) around body."
+  "Put a table environment (with optional caption, label and placement) around
+ body."
   (once-only (stream caption label placement)
     `(progn
        (format ,stream "\\begin{table}")
@@ -356,7 +325,3 @@ placement) around body."
        (if ,caption
 	   (format ,stream "\\caption{~a}" ,caption))
        (format ,stream "\\end{table}~%"))))
-
-(defun math-inline (string)
-  "Convenience function for formatting things in math mode."
-  (format nil "$~a$" string))
