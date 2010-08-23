@@ -9,12 +9,11 @@
 
    ;; formatting.lisp
    
-   make-float-formatter make-simple-formatter
+   format-options *default-format-options* format-value
 
    ;; latex-table.lisp
    
    multicolumn aligned raw-tabular lines-to-vector labeled-matrix
    labeled-vector-horizontal labeled-vector-vertical with-table
-   math-inline
 
    ))

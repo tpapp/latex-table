@@ -273,24 +273,24 @@ FORMAT-OPTIONS.  ROW-LABELS and COLUMN-LABELS are sequences."
               (format-value (aref matrix i j) (aref format-options j)))))
     ;; output
     (raw-tabular stream m coltypes vlines hlines)
-    (values))
+    (values)))
 
-  (defun labeled-vector-horizontal (stream vector labels &key
-                                    format-options
-                                    (hlines (vector 0 1 0))
-                                    vlines)
-    "Output vector as a horizontal table."
-    (let* ((vector (coerce vector 'vector))
-           (labels (coerce labels 'vector))
-           (n (length vector)))
-      (assert (= n (length labels)))
-      (let* ((m (make-array (list 2 n)))
-             (vlines (lines-to-vector n vlines))
-             (format-options (make-format-options format-options n))
-             (coltypes (make-array n :initial-element :align)))
-        (setf (sub m 0 t) labels)
-        (setf (sub m 1 t) (map 'vector #'format-value vector format-options))
-        (raw-tabular stream m coltypes vlines hlines)))))
+(defun labeled-vector-horizontal (stream vector labels &key
+                                  format-options
+                                  (hlines (vector 0 1 0))
+                                  vlines)
+  "Output vector as a horizontal table."
+  (let* ((vector (coerce vector 'vector))
+         (labels (coerce labels 'vector))
+         (n (length vector)))
+    (assert (= n (length labels)))
+    (let* ((m (make-array (list 2 n)))
+           (vlines (lines-to-vector n vlines))
+           (format-options (make-format-options format-options n))
+           (coltypes (make-array n :initial-element :align)))
+      (setf (sub m 0 t) labels)
+      (setf (sub m 1 t) (map 'vector #'format-value vector format-options))
+      (raw-tabular stream m coltypes vlines hlines))))
 
 (defun labeled-vector-vertical (stream vector labels &key
                                 format-options
