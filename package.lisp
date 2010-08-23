@@ -1,7 +1,9 @@
 (in-package #:latex-table-asd)
 
 (defpackage latex-table
-  (:use :common-lisp :iterate :metabang-bind :cl-utilities)
+  (:use :common-lisp :iterate :metabang-bind :alexandria :anaphora
+        :cl-num-utils)
+  (:shadowing-import-from :cl-num-utils :mean :xor) ; also in alexandria
   (:shadowing-import-from :iterate :collecting :collect)
   (:export
 

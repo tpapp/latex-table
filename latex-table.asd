@@ -11,4 +11,5 @@
   :components ((:file "package")
 	       (:file "formatting" :depends-on ("package"))
 	       (:file "latex-table" :depends-on ("formatting")))
-  :depends-on (:iterate :metabang-bind :cl-utilities))
+  :depends-on (:iterate :metabang-bind :alexandria :anaphora
+                        :cl-num-utils))
