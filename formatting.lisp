@@ -86,7 +86,7 @@ max-exponent.  Requires math mode in LaTeX."
                      ((:values int-string frac-string)
                       (format-base10 mantissa digits)))
                 (values int-string
-                        (format nil "~A\\times10^{~A}"
+                        (format nil "~A{\\times}10^{~A}"
                                 frac-string exponent))))))
     `(:align ,(math-inline (if negative? "-" "") int-string)
              ,(math-inline frac-string))))
