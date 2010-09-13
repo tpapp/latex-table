@@ -28,12 +28,15 @@ The following column types are
 possible: :left, :right, :center, :align.  Aligned pairs can only be
 accommodated in a column of type :align.
 
-vlines and hlines need to be vectors one element longer than the
+VLINES and HLINES need to be vectors one element longer than the
 number of columns/rows, respectively.  They can contain small
 nonnegative integers 0, 1, 2 and 3 (mapping to the right number of
 lines), and for vlines, also arbitrary strings (eg \"|\", \"@{\\ }\")
 and characters (#\|, etc).  The latter two are not checked for
 correctness in LaTeX.
+
+HLINES can also contain :top, :mid, and :bottom, which are treated as \toprule
+\midrule and \bottomrule, or 
 
 position corresponds to LaTeX tabular's pos argument for vertical
 position, and can be either :top or :bottom."
@@ -43,138 +46,169 @@ position, and can be either :top or :bottom."
   ;; feel it is worth dealing with the extra complexity here so that
   ;; functions calling raw-tabular don't have to.
   (assert (and (arrayp matrix) (= (array-rank matrix) 2)))
-  (labels ((multicolumn (cols pos text)
-	     (format stream "\\multicolumn{~a}{~a}{~a}"
-		     cols 
-		     (ecase pos 
-		       (:left "l") (:right "r") (:center "c"))
-		     text))
-	   (vline (type)
-	     "Return a string for each vline specification.  Currently
-only 0 (no line) and small integers are allowed."
-	     (etypecase type
-	       ((integer 0) (ecase type	; number of |'s
-			      (0 "")
-			      (1 "|")
-			      (2 "||")
-			      (3 "|||")))
-	       (character (string type)) ; character to be converted
-	       (string type)))		 ; explicit string
-	   (hline (type separator)
-	     "Output a string for each hline specification _to
-stream_.  Currently only 0 (no line) and small integers are allowed.
-If the string is nonempty, it is closed with separator."
-	     (let ((string (ecase type
-			     (0 "")
-			     (1 "\\hline")
-			     (2 "\\hline\\hline")
-			     (3 "\\hline\\hline\\\hline"))))
-	       (princ string stream)
-	       (princ (if (string= string "") "" separator) stream))))
-    (bind (((nrow ncol) (array-dimensions matrix)))
-      (assert (and (vectorp coltypes) (= (length coltypes) ncol)
-		   (vectorp vlines) (= (length vlines) (1+ ncol))
-		   (vectorp hlines) (= (length hlines) (1+ nrow))))
-      ;; header
-      (format stream "\\begin{~a}[~a]{" environment
-	      (ecase position
-		(:top "t")
-		(:bottom "b")))
-      (iter
-	(for coltype :in-vector coltypes)
-	(for vline :in-vector vlines)
-	(format stream "~a~a" 
-		(vline vline)
-		(ecase coltype
-		  (:left "l")
-		  (:right "r")
-		  (:center "c")
-		  (:align "r@{}l"))))
-      (format stream "~a}~%" (vline (aref vlines (1- (length vlines)))))
-      ;; matrix
-      (dotimes (i nrow)
-	;; hline spec, before each row
-	(hline (aref hlines i) " ")
-	(let ((multicol-countdown 0))
-	  ;; cells in each row
-	  (dotimes (j ncol)
-	  (if (plusp multicol-countdown)
-	      ;; do not even parse cell, just skip and ignore
-	      (decf multicol-countdown)
-	      ;; parse cell
-	      (bind ((cell (aref matrix i j))
-		     (coltype (aref coltypes j))
-		     ((:values type first second third)
-		      ;; here we verify correctness of all forms, and
-		      ;; separate type from parameters
-		      (if (atom cell)
-                          ;; an atom has type :any
-                          (values :any cell)
-                          ;; identify various keywords
-                          (let ((type (car cell))
-                                (params (cdr cell)))
-                            (ecase type
-                              ;; one of the aligned types
-                              ((:left :right :center)
-                                 (bind (((x) params))
-                                   (when (symbolp x)
-                                     (error "~a is a symbol" x))
-                                   (values type x)))
-                              ;; aligned pair
-                              (:align
-                                 (bind (((a b) params))
-                                   (values :align a b)))
-                              ;; multicolumn
-                              (:multicolumn
-                                 (bind (((col pos a) params))
-                                   ;; we skip the next (1- col) cells
-                                   (setf multicol-countdown (1- col))
-                                   ;; calculate the actual number of
-                                   ;; columns seen by LaTeX, taking
-                                   ;; :align columns into account
-                                   (let ((total-col
-                                          (iter
-                                            (for i :from 0 :below col)
-                                            (for coltype :in-vector coltypes :from j)
-                                            (summing (if (eq coltype :align) 2 1)))))
-                                     (values :multicolumn total-col pos a)))))))))
-		;; output cell to stream
-		(ecase coltype
-		  (:align
-		   (ecase type
-		     (:align		; aligned pair
-		      (format stream "~a & ~a" first second))
-		     (:multicolumn	; have already accounted for
+  (let ((column-positions
+         (iter
+           (with cumulative-position := 1) ; LaTeX counts from 0
+           (for coltype :in-vector coltypes)
+           (when (first-iteration-p)
+             (collect cumulative-position :result-type vector))
+           (incf cumulative-position (if (eq coltype :align) 2 1))
+           (collect cumulative-position :result-type vector))))
+    (labels ((multicolumn (cols pos text)
+               (format stream "\\multicolumn{~a}{~a}{~a}"
+                       cols 
+                       (ecase pos 
+                         (:left "l") (:right "r") (:center "c"))
+                       text))
+             (vline (type)
+               ;; Return a string for each vline specification.  Currently only 0
+               ;; (no line) and small integers are allowed.
+               (etypecase type
+                 ((integer 0) (ecase type ; number of |'s
+                                (0 "")
+                                (1 "|")
+                                (2 "||")
+                                (3 "|||")))
+                 (character (string type)) ; character to be converted
+                 (string type)))           ; explicit string
+             (process-hline (specification)
+               (bind (((:flet process-list (list))
+                       (ecase (car list)
+                         ((:top :mid :bottom)
+                            (bind (((head &optional width) list))
+                              (princ (ecase head
+                                       (:top "\\toprule")
+                                       (:mid "\\midrule")
+                                       (:bottom "\\bottomrule"))
+                                     stream)
+                              (when width
+                                (format stream "[~A]" width))))
+                         (:cmid
+                            (bind (((a b &key trim width) (cdr specification)))
+                              (princ "\\cmidrule" stream)
+                              (when width
+                                (format stream "[~A]" width))
+                              (when trim
+                                (format stream "(~A)" trim))
+                              (format stream "{~A-~A}"
+                                      (sub column-positions a)
+                                      (let ((b-adj (sub column-positions b)))
+                                        (when (eq (aref coltypes b) :align)
+                                          (incf b-adj))
+                                        b-adj)))))))
+                 (etypecase specification
+                   (fixnum (unless (zerop specification)
+                             (dotimes (i specification)
+                               (princ "\\hline" stream))))
+                   (keyword (process-list (list specification)))
+                   (list (process-list specification))
+                   (vector (map nil #'process-hline specification))))))
+      (bind (((nrow ncol) (array-dimensions matrix)))
+        (assert (and (vectorp coltypes) (= (length coltypes) ncol)
+                     (vectorp vlines) (= (length vlines) (1+ ncol))
+                     (vectorp hlines) (= (length hlines) (1+ nrow))))
+        ;; header
+        (format stream "\\begin{~a}[~a]{" environment
+                (ecase position
+                  (:top "t")
+                  (:bottom "b")))
+        (iter
+          (for coltype :in-vector coltypes)
+          (for vline :in-vector vlines)
+          (format stream "~a~a" 
+                  (vline vline)
+                  (ecase coltype
+                    (:left "l")
+                    (:right "r")
+                    (:center "c")
+                    (:align "r@{}l"))))
+        (format stream "~a}~%" (vline (aref vlines (1- (length vlines)))))
+        ;; matrix
+        (dotimes (i nrow)
+          ;; hline spec, before each row
+          (process-hline (aref hlines i))
+          (princ #\space stream)
+          (let ((multicol-countdown 0))
+            ;; cells in each row
+            (dotimes (j ncol)
+              (if (plusp multicol-countdown)
+                  ;; do not even parse cell, just skip and ignore
+                  (decf multicol-countdown)
+                  ;; parse cell
+                  (bind ((cell (aref matrix i j))
+                         (coltype (aref coltypes j))
+                         ((:values type first second third)
+                          ;; here we verify correctness of all forms, and
+                          ;; separate type from parameters
+                          (if (atom cell)
+                              ;; an atom has type :any
+                              (values :any cell)
+                              ;; identify various keywords
+                              (let ((type (car cell))
+                                    (params (cdr cell)))
+                                (ecase type
+                                  ;; one of the aligned types
+                                  ((:left :right :center)
+                                     (bind (((x) params))
+                                       (when (symbolp x)
+                                         (error "~a is a symbol" x))
+                                       (values type x)))
+                                  ;; aligned pair
+                                  (:align
+                                     (bind (((a b) params))
+                                       (values :align a b)))
+                                  ;; multicolumn
+                                  (:multicolumn
+                                     (bind (((col pos a) params))
+                                       ;; we skip the next (1- col) cells
+                                       (setf multicol-countdown (1- col))
+                                       ;; calculate the actual number of
+                                       ;; columns seen by LaTeX, taking
+                                       ;; :align columns into account
+                                       (let ((total-col
+                                              (iter
+                                                (for i :from 0 :below col)
+                                                (for coltype :in-vector coltypes :from j)
+                                                (summing (if (eq coltype :align) 2 1)))))
+                                         (values :multicolumn total-col pos a)))))))))
+                    ;; output cell to stream
+                    (ecase coltype
+                      (:align
+                         (ecase type
+                           (:align      ; aligned pair
+                              (format stream "~a & ~a" first second))
+                           (:multicolumn ; have already accounted for
 					; extra columns above
-		      (multicolumn first second third))
-		     ((:left :right :center)
-		      (multicolumn 2 type first))
-		     ((:any)		; any defaults to :center in a mc setting
-		      (multicolumn 2 :center first))))
-		  ((:left :right :center)
-		   (ecase type
-		     ((:left :right :center :any)
-		      (if (or (eq type coltype) (eq type :any))
-			  ;; same type as column, or no type
-			  (format stream "~a" first)
-			  ;; different type, has to use multicolumn to align
-			  (multicolumn 1 type first)))
-		     (:multicolumn
-		      (multicolumn first second third))
-		     (:align		; aligned pair, just center
-		      (multicolumn 1 :center (concatenate 'string first second))))))))
-            ;; close with & or \\
-            (if (= (1- ncol) j)
-                ;; technically, a nonzero multicol-countdown would lead
-                ;; to malformed LaTeX code here, but that can never
-                ;; ("should not") occur
-                (format stream "\\\\~%")
-                (when (zerop multicol-countdown)
-                  (format stream " & "))))))
-      ;; hline spec, for last row
-      (hline (aref hlines nrow) #\newline)
-      ;; closing
-      (format stream "\\end{~a}~%" environment))))
+                              (multicolumn first second third))
+                           ((:left :right :center)
+                              (multicolumn 2 type first))
+                           ((:any)     ; any defaults to :center in a mc setting
+                              (multicolumn 2 :center first))))
+                      ((:left :right :center)
+                         (ecase type
+                           ((:left :right :center :any)
+                              (if (or (eq type coltype) (eq type :any))
+                                  ;; same type as column, or no type
+                                  (format stream "~a" first)
+                                  ;; different type, has to use multicolumn to align
+                                  (multicolumn 1 type first)))
+                           (:multicolumn
+                              (multicolumn first second third))
+                           (:align      ; aligned pair, just center
+                              (multicolumn 1 :center (concatenate 'string first second))))))))
+              ;; close with & or \\
+              (if (= (1- ncol) j)
+                  ;; technically, a nonzero multicol-countdown would lead
+                  ;; to malformed LaTeX code here, but that can never
+                  ;; ("should not") occur
+                  (format stream "\\\\~%")
+                  (when (zerop multicol-countdown)
+                    (format stream " & "))))))
+        ;; hline spec, for last row
+        (process-hline (aref hlines nrow))
+        (princ #\newline stream)
+        ;; closing
+        (format stream "\\end{~a}~%" environment)))))
 
 (defun lines-to-vector (n line-type-pairs)
   "There are two ways to specify horizontal/vertical lines for tables:
@@ -247,7 +281,7 @@ Examples:
     (t (error "line-type-pairs has to be a vector or a proper list"))))
 
 (defun labeled-matrix (stream matrix column-labels row-labels &key 
-                       format-options (hlines '(1 1)) (vlines '(1 1))
+                       format-options (hlines '(0 :top 1 :mid -1 :bottom)) vlines
                        (corner-cell ""))
   "Output matrix as a simple table, with given row and column labels.
 The elements of matrix are expected to be numeric, and formatted using
