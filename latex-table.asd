@@ -1,15 +1,9 @@
-(defpackage #:latex-table-asd
-  (:use :cl :asdf))
-
-(in-package :latex-table-asd)
-
-(defsystem latex-table
+(defsystem #:latex-table
   :description "Pretty latex tables from Lisp matrices and vectors."
   :author "Tamas K Papp"
-  :license "LLGPL"
+  :license "Boost Software License, Version 1.0."
   :serial t
   :components ((:file "package")
-	       (:file "formatting" :depends-on ("package"))
-	       (:file "latex-table" :depends-on ("formatting")))
-  :depends-on (:iterate :metabang-bind :alexandria :anaphora
-                        :cl-num-utils))
+	       (:file "formatting")
+	       (:file "latex-table"))
+  :depends-on (#:iterate  #:let-plus #:alexandria #:anaphora #:cl-num-utils))
