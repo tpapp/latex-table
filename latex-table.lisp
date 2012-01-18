@@ -10,36 +10,40 @@
   (list :align x y))
 
 (defun raw-tabular (stream matrix coltypes vlines hlines &key (position :top)
-		    (environment "tabular"))
+                                                              (environment "tabular"))
   (declare (optimize (debug 3)))
-  "Output matrix in a latex tabular environment (you can also specify
-another environment).  Matrix can have the following element types:
+  "Output matrix in a latex tabular environment (you can also specify another
+environment).
 
- string -- aligned according to coltypes (centered for :align column type)
- (:left string) -- flushed left
- (:right string) -- flushed right
- (:center string) -- centered
- (:align string string) -- aligned pair
- (:align string) -- aligned with second part missing
- (:multicolumn cols pos string) -- LaTeX multicolumn, subsequent cols-1 elements
-    are ignored
+Elements of MATRIX have to be one of the following:
 
-The following column types are
-possible: :left, :right, :center, :align.  Aligned pairs can only be
-accommodated in a column of type :align.
+ STRING
+   aligned according to coltypes (centered for :align column type)
 
-VLINES and HLINES need to be vectors one element longer than the
-number of columns/rows, respectively.  They can contain small
-nonnegative integers 0, 1, 2 and 3 (mapping to the right number of
-lines), and for vlines, also arbitrary strings (eg \"|\", \"@{\\ }\")
-and characters (#\|, etc).  The latter two are not checked for
-correctness in LaTeX.
+ (:LEFT STRING), (:RIGHT STRING), (:CENTER STRING)
+   flushed left/right, or centered
 
-HLINES can also contain :top, :mid, and :bottom, which are treated as \toprule
-\midrule and \bottomrule, or 
+ (:ALIGN STRING STRING)
+    aligned pair
+ (:ALIGN STRING)
+    aligned with second part missing
+ (:MULTICOLUMN COLS POS STRING)
+   LaTeX multicolumn, subsequent (1- COLS) elements are ignored
 
-position corresponds to LaTeX tabular's pos argument for vertical
-position, and can be either :top or :bottom."
+The following column types are possible: :LEFT, :RIGHT, :CENTER, :ALIGN.
+Aligned pairs can only be accommodated in a column of type :align.
+
+VLINES and HLINES need to be vectors one element longer than the number of
+columns/rows, respectively.  They can contain small nonnegative integers 0, 1,
+2 and 3 (mapping to the right number of lines), and for vlines, also arbitrary
+strings (eg \"|\", \"@{\\ }\") and characters (#\|, etc).  The latter two are
+not checked for correctness in LaTeX.
+
+HLINES can also contain :TOP, :MID, and :BOTTOM, which are treated as \toprule
+\midrule and \bottomrule.
+
+POSITION corresponds to LaTeX tabular's pos argument for vertical
+position, and can be either :TOP or :BOTTOM."
   ;; Implementation notes: a column of type :align is actually two
   ;; columns, separated by @{}.  This is very useful for aligning
   ;; numbers on the decimal dot and similar arrangements, and thus I
@@ -47,17 +51,17 @@ position, and can be either :top or :bottom."
   ;; functions calling raw-tabular don't have to.
   (assert (and (arrayp matrix) (= (array-rank matrix) 2)))
   (let ((column-positions
-         (iter
-           (with cumulative-position := 1) ; LaTeX counts from 0
-           (for coltype :in-vector coltypes)
-           (when (first-iteration-p)
-             (collect cumulative-position :result-type vector))
-           (incf cumulative-position (if (eq coltype :align) 2 1))
-           (collect cumulative-position :result-type vector))))
+          (iter
+            (with cumulative-position := 1) ; LaTeX counts from 0
+            (for coltype :in-vector coltypes)
+            (when (first-iteration-p)
+              (collect cumulative-position :result-type vector))
+            (incf cumulative-position (if (eq coltype :align) 2 1))
+            (collect cumulative-position :result-type vector))))
     (labels ((multicolumn (cols pos text)
                (format stream "\\multicolumn{~a}{~a}{~a}"
-                       cols 
-                       (ecase pos 
+                       cols
+                       (ecase pos
                          (:left "l") (:right "r") (:center "c"))
                        text))
              (vline (type)
@@ -72,10 +76,10 @@ position, and can be either :top or :bottom."
                  (character (string type)) ; character to be converted
                  (string type)))           ; explicit string
              (process-hline (specification)
-               (bind (((:flet process-list (list))
-                       (ecase (car list)
-                         ((:top :mid :bottom)
-                            (bind (((head &optional width) list))
+               (let+ (((&flet process-list (list)
+                         (ecase (car list)
+                           ((:top :mid :bottom)
+                            (let+ (((head &optional width) list))
                               (princ (ecase head
                                        (:top "\\toprule")
                                        (:mid "\\midrule")
@@ -83,8 +87,8 @@ position, and can be either :top or :bottom."
                                      stream)
                               (when width
                                 (format stream "[~A]" width))))
-                         (:cmid
-                            (bind (((a b &key trim width) (cdr specification)))
+                           (:cmid
+                            (let+ (((a b &key trim width) (cdr specification)))
                               (princ "\\cmidrule" stream)
                               (when width
                                 (format stream "[~A]" width))
@@ -95,7 +99,7 @@ position, and can be either :top or :bottom."
                                       (let ((b-adj (sub column-positions b)))
                                         (when (eq (aref coltypes b) :align)
                                           (incf b-adj))
-                                        b-adj)))))))
+                                        b-adj))))))))
                  (etypecase specification
                    (fixnum (unless (zerop specification)
                              (dotimes (i specification)
@@ -103,7 +107,7 @@ position, and can be either :top or :bottom."
                    (keyword (process-list (list specification)))
                    (list (process-list specification))
                    (vector (map nil #'process-hline specification))))))
-      (bind (((nrow ncol) (array-dimensions matrix)))
+      (let+ (((nrow ncol) (array-dimensions matrix)))
         (assert (and (vectorp coltypes) (= (length coltypes) ncol)
                      (vectorp vlines) (= (length vlines) (1+ ncol))
                      (vectorp hlines) (= (length hlines) (1+ nrow))))
@@ -115,7 +119,7 @@ position, and can be either :top or :bottom."
         (iter
           (for coltype :in-vector coltypes)
           (for vline :in-vector vlines)
-          (format stream "~a~a" 
+          (format stream "~a~a"
                   (vline vline)
                   (ecase coltype
                     (:left "l")
@@ -135,9 +139,9 @@ position, and can be either :top or :bottom."
                   ;; do not even parse cell, just skip and ignore
                   (decf multicol-countdown)
                   ;; parse cell
-                  (bind ((cell (aref matrix i j))
+                  (let+ ((cell (aref matrix i j))
                          (coltype (aref coltypes j))
-                         ((:values type first second third)
+                         ((&values type first second third)
                           ;; here we verify correctness of all forms, and
                           ;; separate type from parameters
                           (if (atom cell)
@@ -149,53 +153,53 @@ position, and can be either :top or :bottom."
                                 (ecase type
                                   ;; one of the aligned types
                                   ((:left :right :center)
-                                     (bind (((x) params))
-                                       (when (symbolp x)
-                                         (error "~a is a symbol" x))
-                                       (values type x)))
+                                   (let+ (((x) params))
+                                     (when (symbolp x)
+                                       (error "~a is a symbol" x))
+                                     (values type x)))
                                   ;; aligned pair
                                   (:align
-                                     (bind (((a b) params))
-                                       (values :align a b)))
+                                   (let+ (((a b) params))
+                                     (values :align a b)))
                                   ;; multicolumn
                                   (:multicolumn
-                                     (bind (((col pos a) params))
-                                       ;; we skip the next (1- col) cells
-                                       (setf multicol-countdown (1- col))
-                                       ;; calculate the actual number of
-                                       ;; columns seen by LaTeX, taking
-                                       ;; :align columns into account
-                                       (let ((total-col
-                                              (iter
-                                                (for i :from 0 :below col)
-                                                (for coltype :in-vector coltypes :from j)
-                                                (summing (if (eq coltype :align) 2 1)))))
-                                         (values :multicolumn total-col pos a)))))))))
+                                   (let+ (((col pos a) params))
+                                     ;; we skip the next (1- col) cells
+                                     (setf multicol-countdown (1- col))
+                                     ;; calculate the actual number of
+                                     ;; columns seen by LaTeX, taking
+                                     ;; :align columns into account
+                                     (let ((total-col
+                                             (iter
+                                               (for i :from 0 :below col)
+                                               (for coltype :in-vector coltypes :from j)
+                                               (summing (if (eq coltype :align) 2 1)))))
+                                       (values :multicolumn total-col pos a)))))))))
                     ;; output cell to stream
                     (ecase coltype
                       (:align
-                         (ecase type
-                           (:align      ; aligned pair
-                              (format stream "~a & ~a" first second))
-                           (:multicolumn ; have already accounted for
+                       (ecase type
+                         (:align        ; aligned pair
+                          (format stream "~a & ~a" first second))
+                         (:multicolumn  ; have already accounted for
 					; extra columns above
-                              (multicolumn first second third))
-                           ((:left :right :center)
-                              (multicolumn 2 type first))
-                           ((:any)     ; any defaults to :center in a mc setting
-                              (multicolumn 2 :center first))))
+                          (multicolumn first second third))
+                         ((:left :right :center)
+                          (multicolumn 2 type first))
+                         ((:any)     ; any defaults to :center in a mc setting
+                          (multicolumn 2 :center first))))
                       ((:left :right :center)
-                         (ecase type
-                           ((:left :right :center :any)
-                              (if (or (eq type coltype) (eq type :any))
-                                  ;; same type as column, or no type
-                                  (format stream "~a" first)
-                                  ;; different type, has to use multicolumn to align
-                                  (multicolumn 1 type first)))
-                           (:multicolumn
-                              (multicolumn first second third))
-                           (:align      ; aligned pair, just center
-                              (multicolumn 1 :center (concatenate 'string first second))))))))
+                       (ecase type
+                         ((:left :right :center :any)
+                          (if (or (eq type coltype) (eq type :any))
+                              ;; same type as column, or no type
+                              (format stream "~a" first)
+                              ;; different type, has to use multicolumn to align
+                              (multicolumn 1 type first)))
+                         (:multicolumn
+                          (multicolumn first second third))
+                         (:align        ; aligned pair, just center
+                          (multicolumn 1 :center (concatenate 'string first second))))))))
               ;; close with & or \\
               (if (= (1- ncol) j)
                   ;; technically, a nonzero multicol-countdown would lead
@@ -211,11 +215,10 @@ position, and can be either :top or :bottom."
         (format stream "\\end{~a}~%" environment)))))
 
 (defun lines-to-vector (n line-type-pairs)
-  "There are two ways to specify horizontal/vertical lines for tables:
-one by giving a vector which is passed directly to raw-tabular, the
-other is by giving a _flat_ list line/type pairs, which is processed
-by this function before being passed to raw-tabular.  The syntax is
-the following:
+  "There are two ways to specify horizontal/vertical lines for tables: one by
+giving a vector which is passed directly to raw-tabular, the other is by
+giving a _flat_ list line/type pairs, which is processed by this function
+before being passed to raw-tabular.  The syntax is the following:
 
 line-type-pairs is (list pos1 type1 pos2 type2 ...)
 
@@ -280,13 +283,14 @@ Examples:
 	 lines)))
     (t (error "line-type-pairs has to be a vector or a proper list"))))
 
-(defun labeled-matrix (stream matrix column-labels row-labels &key 
-                       format-options (hlines '(0 :top 1 :mid -1 :bottom)) vlines
-                       (corner-cell ""))
+(defun labeled-matrix (stream matrix column-labels row-labels
+                       &key
+                         format-options (hlines '(0 :top 1 :mid -1 :bottom)) vlines
+                         (corner-cell ""))
   "Output matrix as a simple table, with given row and column labels.
 The elements of matrix are expected to be numeric, and formatted using
 FORMAT-OPTIONS.  ROW-LABELS and COLUMN-LABELS are sequences."
-  (bind (((nrow ncol) (array-dimensions matrix))
+  (let+ (((nrow ncol) (array-dimensions matrix))
 	 (m (make-array (list (1+ nrow) (1+ ncol))))
 	 (hlines (lines-to-vector (1+ nrow) hlines))
 	 (vlines (lines-to-vector (1+ ncol) vlines))
@@ -296,8 +300,8 @@ FORMAT-OPTIONS.  ROW-LABELS and COLUMN-LABELS are sequences."
 	 (column-labels (coerce column-labels 'vector)))
     (setf (aref coltypes 0) :left)
     ;; corner, row and column labels
-    (setf (sub m (si 1 0) 0) row-labels
-          (sub m 0 (si 1 0)) column-labels
+    (setf (sub m (cons 1 nil) 0) row-labels
+          (sub m 0 (cons 1 nil)) column-labels
           (aref m 0 0) corner-cell
           (aref coltypes 0) :left)
     ;; cells

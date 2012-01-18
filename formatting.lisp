@@ -1,4 +1,4 @@
-(in-package :latex-table)
+(in-package #:latex-table)
 
 (defun exp10 (power)
   "10^power."
@@ -19,13 +19,13 @@ rationals."
                 exponent (1- exponent))
           (let ((upper-limit (* 10 lower-limit)))
             (if (< number upper-limit)
-                (return-from exact-log10 
+                (return-from exact-log10
                   (values exponent (/ number lower-limit)))
                 (setf lower-limit upper-limit
                       exponent (1+ exponent))))))))
 
 (defclass format-options ()
-  ((min-exponent :accessor min-exponent :initarg :min-exponent :documentation 
+  ((min-exponent :accessor min-exponent :initarg :min-exponent :documentation
                  "Floats below this value are printed in standard form.")
    (max-exponent :accessor max-exponent :initarg :max-exponent :documentation
                  "Floats (and maybe integers, see STANDARDIZE-INTEGER?) above
@@ -35,15 +35,15 @@ rationals."
    (special-values :accessor special-values :initarg :special-values
                    :initform '((nil "n/a")) :documentation
                    "Lists of (value output).  When a cell is EQUAL to VALUE,
-                   OUTPUT will be used in the table.")   
-   (standardize-integer? :accessor standardize-integer? :initform t :initarg 
+                   OUTPUT will be used in the table.")
+   (standardize-integer? :accessor standardize-integer? :initform t :initarg
                          :standardize-integer? :documentation
                          "When non-nil, integers above MAX-EXPONENT will be
    treated as floats and standardized.")))
 
 (defmethod initialize-instance :after ((format-options format-options)
                                        &key &allow-other-keys)
-  (bind (((:slots min-exponent max-exponent digits special-values)
+  (let+ (((&slots min-exponent max-exponent digits special-values)
           format-options))
     (check-type digits (integer 0))
     (check-type special-values list)
@@ -66,7 +66,7 @@ separator is included."
   "Return two string values, containing the formatted integer and fractional
 parts of a (positive) rational."
   (assert (<= 0 rational))
-  (bind (((:values int frac) (floor rational)))
+  (let+ (((&values int frac) (floor rational)))
     (values (format nil "~d" int)
             (format nil ".~v,'0d" digits (round frac (exp10 (- digits)))))))
 
@@ -74,16 +74,16 @@ parts of a (positive) rational."
   "Format float for LaTeX.  Return (list int-string frac-string), where the
 latter may include the exponent if float is outside min-exponent and
 max-exponent.  Requires math mode in LaTeX."
-  (bind (((:slots digits min-exponent max-exponent) format-options)
+  (let+ (((&slots-r/o digits min-exponent max-exponent) format-options)
          (rational (rationalize float))
-         ((:values abs negative?) (if (minusp rational)
+         ((&values abs negative?) (if (minusp rational)
                                       (values (- rational) t)
                                       (values rational nil)))
-         ((:values int-string frac-string)
+         ((&values int-string frac-string)
           (if (<= min-exponent abs max-exponent)
               (format-base10 abs digits)
-              (bind (((:values exponent mantissa) (exact-log10 abs))
-                     ((:values int-string frac-string)
+              (let+ (((&values exponent mantissa) (exact-log10 abs))
+                     ((&values int-string frac-string)
                       (format-base10 mantissa digits)))
                 (values int-string
                         (format nil "~A{\\times}10^{~A}"
@@ -94,7 +94,7 @@ max-exponent.  Requires math mode in LaTeX."
 (defun format-value (value format-options)
   "Format VALUE according to FORMAT-OPTIONS.  Return a value that is suitable
 for a cell in an array passed to RAW-TABULAR."
-  (bind (((:slots max-exponent standardize-integer?) format-options))
+  (let+ (((&slots-r/o max-exponent standardize-integer?) format-options))
     (acond
       ((find value (special-values format-options) :key #'car :test #'equal)
        (second it))
@@ -114,13 +114,14 @@ for a cell in an array passed to RAW-TABULAR."
       (t (format nil "~A" value)))))
 
 (defun make-format-options (object ncol)
-  "Make a vectos FORMAT-OPTIONS from objects from an non-vector (used
+  "Make a vector FORMAT-OPTIONS from objects from an non-vector (used
 repeatedly) or a vector.  Each element (or the atom) may be already be such an
 object (passed through), a LIST (used with MAKE-INSTANCE), or NIL (using the
-default).  For internal use, in LABELED-* macros.  If NCOL is non-nil, a vector
-argument is returned (using identical elements, if OBJECT is not a vector), if
-it is NIL, then the value is always a single element which can be used
-directly."
+default).
+
+For internal use, in LABELED-* macros.  If NCOL is non-nil, a vector argument
+is returned (using identical elements, if OBJECT is not a vector), if it is
+NIL, then the value is always a single element which can be used directly."
   (flet ((process (object)
            (etypecase object
              (null *default-format-options*)
