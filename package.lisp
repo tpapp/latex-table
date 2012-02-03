@@ -1,7 +1,8 @@
 (defpackage #:latex-table
   (:use #:common-lisp #:iterate #:let-plus #:alexandria #:anaphora
         #:cl-num-utils)
-  (:shadowing-import-from #:cl-num-utils #:mean #:variance #:xor #:median) ; also in alexandria
+  (:shadowing-import-from #:cl-num-utils #:mean #:variance #:xor
+                          #:median #:displace-array) ; also in alexandria
   (:export
    ;; formatting.lisp
    #:format-options
