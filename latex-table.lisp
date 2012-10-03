@@ -1,13 +1,180 @@
 (in-package :latex-table)
 
+
+
+
+;;; Telling latex-table about orientation
+
+(defstruct content-mixin content)
+
+(defun content (cell) (content-mixin-content cell))
+
+(defstruct (left (:constructor left (content)) (:include content-mixin)))
+
+(defstruct (right (:constructor right (content)) (:include content-mixin)))
+
+(defstruct (center (:constructor center (content)) (:include content-mixin)))
+
+(deftype justified ()
+  '(or left right center))
+
+(defstruct (multicolumn (:constructor multicolumn (content number))
+                        (:include content-mixin (content nil :type justified)))
+  (number nil :type (integer 1)))
+
+
+
+
+(defgeneric format-content (content)
+  (:documentation "Return a string that is understood by LaTeX.")
+  (:method ((integer integer))
+    (format nil "~d" integer))
+  (:method ((real real))
+    (format nil "~f" real))
+  (:method ((string string))
+    string))
+
+(defgeneric format-cell (cell)
+  (:method (cell)
+    (format-content cell))
+  (:method ((cell left))
+    (left (format-content (content-mixin-content cell))))
+  (:method ((cell right))
+    (right (format-content (content-mixin-content cell))))
+  (:method ((cell center))
+    (center (format-content (content-mixin-content cell))))
+  (:method ((cell multicolumn))
+    (let+ (((&structure-r/o multicolumn- content number) cell))
+      (multicolumn (format-cell content) number))))
+
+
+
+(defparameter *output* *standard-output*)
+
+(defmacro with-output ((filespec-or-stream) &body body)
+  (once-only (filespec-or-stream)
+    (with-unique-names (body-lambda)
+      `(flet ((,body-lambda () ,@body))
+         (if (streamp ,filespec-or-stream)
+             (let ((*output* ,filespec-or-stream))
+               (,body-lambda))
+             (with-open-file (*output* ,filespec-or-stream
+                                       :direction :output
+                                       :if-does-not-exist :create
+                                       :if-exists :supersede)
+               (,body-lambda)))))))
+
+(defun fresh ()
+  (fresh-line *output*))
+
+(defun dump (string)
+  (princ string *output*))
+
+(defun column-type-string (column-type)
+  (ecase column-type
+    (left "l") (right "r") (center "c")))
+
+(defun dump-multicolumn (number column-type string)
+  (check-type number (integer 1))
+  (format *output* "\\multicolumn{~d}{~a}{~a}"
+          number
+          (column-type-string column-type)
+          string))
+
+(defgeneric dump-cell (column-type cell)
+  (:method (column-type (cell null)))
+  (:method (column-type (cell multicolumn))
+    (let+ (((&structure-r/o multicolumn- content number) cell))
+      (dump-multicolumn number (type-of content)
+                        (content-mixin-content content))))
+  (:method (column-type cell)
+    (let+ ((cell-type (when (typep cell 'content-mixin)
+                        (type-of cell)))
+           (string (if cell-type
+                       (content-mixin-content cell)
+                       cell)))
+      (check-type string string)
+      (if (and cell-type (not (eq cell-type column-type)))
+          (dump-multicolumn 1 cell-type string)
+          (dump string)))))
+
+
+
+(defclass latex-table ()
+  ((column-types :initarg :column-types)
+   (cells :initarg :cells)
+   (rules :initarg :rules)))
+
+(defun latex-table (cells
+                    &key (column-types (make-array (array-dimension cells 1)
+                                                   :initial-element 'center)))
+  (make-instance 'latex-table :cells cells
+                              :column-types column-types))
+
+(defclass latex-tabular ()
+  ((column-types :initarg :column-types)
+   (cells :initarg :cells)
+   (rules :initarg :rules)))
+
+(defun latex-table-to-tabular (latex-table)
+  (let+ (((&slots-r/o column-types cells) latex-table)
+         ((nrow ncol) (array-dimensions cells))
+         (tabular (make-array (list nrow ncol))))
+    (loop for row-index below nrow
+          do (fresh)
+             (loop with multi-left = 0
+                   for col-index below ncol
+                   for column-type across column-types
+                   do (setf (aref tabular row-index col-index)
+                            (if (zerop multi-left)
+                                (let ((cell (aref cells row-index col-index)))
+                                  (when (typep cell 'multicolumn)
+                                    (setf multi-left
+                                          (1- (multicolumn-number cell))))
+                                  (format-cell cell))
+                                (prog1 nil
+                                  (decf multi-left))))))
+    (make-instance 'latex-tabular :column-types column-types :cells tabular)))
+
+(defun write-tabular (filespec latex-tabular)
+  (let+ (((&slots-r/o column-types cells) latex-tabular)
+         ((nrow ncol) (array-dimensions cells)))
+    (with-output (filespec)
+      (fresh)
+      (dump "\\begin{tabular}{")
+      (loop for column-type across column-types
+            do (dump (column-type-string column-type)))
+      (dump "}")
+      (loop for row-index below nrow
+            do (fresh)
+               (loop for col-index below ncol
+                     for column-type across column-types
+                     do  (dump-cell column-type
+                                    (aref cells row-index col-index))
+                        (if (= col-index (1- ncol))
+                            (dump " \\\\")
+                            (dump " & "))))
+      (fresh)
+      (dump "\\end{tabular}")
+      (fresh))))
+
+(defparameter *l* (latex-table (make-array '(3 2)
+                                           :initial-contents `((1 2)
+                                                               (3 ,(right 4))
+                                                               (,(multicolumn (center 9) 2) foo)))))
+(defparameter *t* (latex-table-to-tabular *l*))
+
+(write-tabular *standard-output* *t*)
+(write-tabular #P "/tmp/foo.table" *l*)
+
+
+
+
+
+
+
 ;; exported interface for mc/aligned cells, specification in
 ;; raw-tabular can be used directly, should be stable
-
-(defun multicolumn (cols pos string)
-  (list :multicolumn cols pos string))
-
-(defun aligned (x y)
-  (list :align x y))
 
 (defun raw-tabular (stream matrix coltypes vlines hlines &key (position :top)
                                                               (environment "tabular"))

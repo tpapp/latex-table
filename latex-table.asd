@@ -6,4 +6,4 @@
   :components ((:file "package")
 	       (:file "formatting")
 	       (:file "latex-table"))
-  :depends-on (#:iterate  #:let-plus #:alexandria #:anaphora #:cl-num-utils))
+  :depends-on (#:alexandria #:anaphora #:let-plus))
