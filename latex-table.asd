@@ -5,6 +5,6 @@
   :serial t
   :components ((:file "package")
 	       ;; (:file "formatting")
-	       ;; (:file "latex-table")
+	       (:file "latex-table")
                )
   :depends-on (#:alexandria #:anaphora #:array-operations #:let-plus))

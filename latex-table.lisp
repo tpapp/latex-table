@@ -1,4 +1,6 @@
-(in-package :latex-table)
+;;; -*- Mode:Lisp; Syntax:ANSI-Common-Lisp; -*-
+
+(in-package #:latex-table)
 
 ;;; formatting floats
 
@@ -149,7 +151,7 @@
       (fresh)
       (dump "\\begin{tabular}{")
       (loop for column-type across column-types
-            do (dump (column-type-string column-type)))
+            do (dump (latex-column-type-string column-type)))
       (dump "}")
       (loop for row-index below nrow
             do (fresh)
@@ -159,7 +161,7 @@
                           (when cell
                             (unless (zerop col-index)
                               (dump " & "))
-                            (dump-cell cell)))
+                            (latex-cell cell)))
                         (when (= col-index (1- ncol))
                           (dump " \\\\"))))
       (fresh)
@@ -330,12 +332,12 @@
 
 
 
-(defclass latex-table ()
+(defclass table ()
   ((column-types :initarg :column-types)
    (cells :initarg :cells)
    (rules :initarg :rules)))
 
-(defun latex-table (cells
+(defun table (cells
                     &key (column-types :right)
                          (rules '((0 . :top) (-1 . :bottom))))
   (let+ (((nrow ncol) (array-dimensions cells)))
@@ -344,7 +346,7 @@
                    :column-types (ensure-vector ncol column-types :center)
                    :rules (ensure-vector (1+ nrow) rules nil))))
 
-(defun latex-table-to-raw (latex-table)
+(defun table-to-raw (latex-table)
   (let+ (((&slots-r/o column-types cells rules) latex-table)
          ((nrow ncol) (array-dimensions cells))
          (tabular (make-array (list nrow ncol))))
@@ -377,83 +379,67 @@
 ;; (write-raw-latex *standard-output* *t*)
 ;; (write-raw-latex #P"/tmp/foo.table" *t*)
 
-(defun labeled-matrix (stream matrix column-labels row-labels
-                       &key
-                         format-options (hlines '(0 :top 1 :mid -1 :bottom)) vlines
-                         (corner-cell ""))
-  "Output matrix as a simple table, with given row and column labels.
-The elements of matrix are expected to be numeric, and formatted using
-FORMAT-OPTIONS.  ROW-LABELS and COLUMN-LABELS are sequences."
-  (let+ (((nrow ncol) (array-dimensions matrix))
-	 (m (make-array (list (1+ nrow) (1+ ncol))))
-	 (hlines (lines-to-vector (1+ nrow) hlines))
-	 (vlines (lines-to-vector (1+ ncol) vlines))
- 	 (coltypes (make-array (1+ ncol) :initial-element :align))
-         (format-options (make-format-options format-options ncol))
-	 (row-labels (coerce row-labels 'vector))
-	 (column-labels (coerce column-labels 'vector)))
-    (setf (aref coltypes 0) :left)
-    ;; corner, row and column labels
-    (setf (sub m (cons 1 nil) 0) row-labels
-          (sub m 0 (cons 1 nil)) column-labels
-          (aref m 0 0) corner-cell
-          (aref coltypes 0) :left)
-    ;; cells
-    (dotimes (i nrow)
-      (dotimes (j ncol)
-	(setf (aref m (1+ i) (1+ j))
-              (format-value (aref matrix i j) (aref format-options j)))))
-    ;; output
-    (raw-tabular stream m coltypes vlines hlines)
-    (values)))
+;; (defun labeled-matrix (stream matrix column-labels row-labels
+;;                        &key
+;;                          format-options (hlines '(0 :top 1 :mid -1 :bottom)) vlines
+;;                          (corner-cell ""))
+;;   "Output matrix as a simple table, with given row and column labels.
+;; The elements of matrix are expected to be numeric, and formatted using
+;; FORMAT-OPTIONS.  ROW-LABELS and COLUMN-LABELS are sequences."
+;;   (let+ (((nrow ncol) (array-dimensions matrix))
+;; 	 (m (make-array (list (1+ nrow) (1+ ncol))))
+;; 	 (hlines (lines-to-vector (1+ nrow) hlines))
+;; 	 (vlines (lines-to-vector (1+ ncol) vlines))
+;;  	 (coltypes (make-array (1+ ncol) :initial-element :align))
+;;          (format-options (make-format-options format-options ncol))
+;; 	 (row-labels (coerce row-labels 'vector))
+;; 	 (column-labels (coerce column-labels 'vector)))
+;;     (setf (aref coltypes 0) :left)
+;;     ;; corner, row and column labels
+;;     (setf (sub m (cons 1 nil) 0) row-labels
+;;           (sub m 0 (cons 1 nil)) column-labels
+;;           (aref m 0 0) corner-cell
+;;           (aref coltypes 0) :left)
+;;     ;; cells
+;;     (dotimes (i nrow)
+;;       (dotimes (j ncol)
+;; 	(setf (aref m (1+ i) (1+ j))
+;;               (format-value (aref matrix i j) (aref format-options j)))))
+;;     ;; output
+;;     (raw-tabular stream m coltypes vlines hlines)
+;;     (values)))
 
-(defun labeled-vector-horizontal (stream vector labels &key
-                                  format-options
-                                  (hlines (vector 0 1 0))
-                                  vlines)
-  "Output vector as a horizontal table."
-  (let* ((vector (coerce vector 'vector))
-         (labels (coerce labels 'vector))
-         (n (length vector)))
-    (assert (= n (length labels)))
-    (let* ((m (make-array (list 2 n)))
-           (vlines (lines-to-vector n vlines))
-           (format-options (make-format-options format-options n))
-           (coltypes (make-array n :initial-element :align)))
-      (setf (sub m 0 t) labels)
-      (setf (sub m 1 t) (map 'vector #'format-value vector format-options))
-      (raw-tabular stream m coltypes vlines hlines))))
+;; (defun labeled-vector-horizontal (stream vector labels &key
+;;                                   format-options
+;;                                   (hlines (vector 0 1 0))
+;;                                   vlines)
+;;   "Output vector as a horizontal table."
+;;   (let* ((vector (coerce vector 'vector))
+;;          (labels (coerce labels 'vector))
+;;          (n (length vector)))
+;;     (assert (= n (length labels)))
+;;     (let* ((m (make-array (list 2 n)))
+;;            (vlines (lines-to-vector n vlines))
+;;            (format-options (make-format-options format-options n))
+;;            (coltypes (make-array n :initial-element :align)))
+;;       (setf (sub m 0 t) labels)
+;;       (setf (sub m 1 t) (map 'vector #'format-value vector format-options))
+;;       (raw-tabular stream m coltypes vlines hlines))))
 
-(defun labeled-vector-vertical (stream vector labels &key
-                                format-options
-				hlines
-				(vlines (vector 0 1 0)))
-  "Output vector as a vertical table."
-  (let* ((vector (coerce vector 'vector))
-	 (labels (coerce labels 'vector))
-	 (n (length vector)))
-    (assert (= n (length labels)))
-    (let* ((m (make-array (list n 2)))
-	   (hlines (lines-to-vector n hlines))
-           (format-options (make-format-options format-options nil))
-	   (coltypes (make-array 2 :initial-element :align)))
-      (setf (sub m t 0) labels)
-      (setf (sub m t 1) (map 'vector (lambda (v) (format-value v format-options))
-                             vector))
-      (raw-tabular stream m coltypes vlines hlines))))
-
-(defmacro with-table ((stream &key caption label (placement "htbp")) &body body)
-  "Put a table environment (with optional caption, label and placement) around
- body."
-  (once-only (stream caption label placement)
-    `(progn
-       (format ,stream "\\begin{table}")
-       (if ,placement
-	   (format ,stream "[~a]" ,placement))
-       (terpri ,stream)
-       ,@body
-       (if ,label
-	   (format ,stream "\\label{~a}" ,label))
-       (if ,caption
-	   (format ,stream "\\caption{~a}" ,caption))
-       (format ,stream "\\end{table}~%"))))
+;; (defun labeled-vector-vertical (stream vector labels &key
+;;                                 format-options
+;; 				hlines
+;; 				(vlines (vector 0 1 0)))
+;;   "Output vector as a vertical table."
+;;   (let* ((vector (coerce vector 'vector))
+;; 	 (labels (coerce labels 'vector))
+;; 	 (n (length vector)))
+;;     (assert (= n (length labels)))
+;;     (let* ((m (make-array (list n 2)))
+;; 	   (hlines (lines-to-vector n hlines))
+;;            (format-options (make-format-options format-options nil))
+;; 	   (coltypes (make-array 2 :initial-element :align)))
+;;       (setf (sub m t 0) labels)
+;;       (setf (sub m t 1) (map 'vector (lambda (v) (format-value v format-options))
+;;                              vector))
+;;       (raw-tabular stream m coltypes vlines hlines))))
