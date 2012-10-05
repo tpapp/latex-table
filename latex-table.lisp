@@ -138,10 +138,15 @@ Contents of cells that coincide with multicolumn tables are ignored."))
 
 
 ;;; writing to a stream
+;;;
+;;;
 
-(defparameter *output* *standard-output*)
+(defparameter *output* *standard-output*
+  "Variable holding the stream output commands write to.")
 
 (defmacro with-output ((filespec-or-stream) &body body)
+  "Make output commands write to the given target for the scope of BODY.
+Filespecs are opened, streams are used as is."
   (once-only (filespec-or-stream)
     (with-unique-names (body-lambda)
       `(flet ((,body-lambda () ,@body))
@@ -155,9 +160,11 @@ Contents of cells that coincide with multicolumn tables are ignored."))
                (,body-lambda)))))))
 
 (defun fresh ()
+  "Fresh line in output."
   (fresh-line *output*))
 
 (defun dump (string)
+  "Write STRING to output."
   (check-type string string)
   (princ string *output*))
 
@@ -170,9 +177,8 @@ Contents of cells that coincide with multicolumn tables are ignored."))
 ;;; numprint type).  The user should load these in LaTeX when including the
 ;;; tables.
 
-;;; primitive LaTeX constructs
-
 (defun latex-column-type-string (column-type)
+  "Return the LaTeX fragment designating a given column type, as a string."
   (etypecase column-type
     ((eql :left) "l")
     ((eql :right) "r")
@@ -181,6 +187,7 @@ Contents of cells that coincide with multicolumn tables are ignored."))
                 (format nil "n{~d}{~d}" before after)))))
 
 (defun latex-multicolumn (number column-type string)
+  "Write a LaTeX \\multicolumn fragment."
   (check-type number (integer 1))
   (check-type string string)
   (format *output* "\\multicolumn{~d}{~a}{~a}"
@@ -189,6 +196,7 @@ Contents of cells that coincide with multicolumn tables are ignored."))
           string))
 
 (defgeneric latex-cell (cell)
+  (:documentation "Write a cell in LaTeX format.")
   (:method ((cell null)))
   (:method ((cell multicolumn))
     (let+ (((&multicolumn alignment content number) cell))
@@ -199,11 +207,8 @@ Contents of cells that coincide with multicolumn tables are ignored."))
   (:method ((cell string))
     (dump cell)))
 
-
-
-;;; LaTeX output
-
-(defgeneric write-latex (filespec-or-stream raw-table)
+(defgeneric write-latex (filespec-or-stream table)
+  (:documentation "Write TABLE to FILESPEC-OR-STREAM for LaTeX.")
   (:method (filespec-or-stream (raw-table raw-table))
     (let+ (((&slots-r/o column-types cells) raw-table)
            ((nrow ncol) (array-dimensions cells)))
@@ -233,11 +238,15 @@ Contents of cells that coincide with multicolumn tables are ignored."))
 ;;; ASCII output
 
 (defun decimal-position (string)
+  "Return the position of the decimal dot in STRING.  If no decimal dot is
+present, return the length of the string, which implies that the string will
+be aligned left of the decimal dot in numprint columns."
   (let ((position (position #\. string)))
     (aif position it (length string))))
 
 (defun numprint-widths (cell)
-  "Return a list of the length of various parts."
+  "Break the contents of cell into two parts around the decimal dot, return
+the length of each as a cons."
   (let+ (((&flet width2 (string)
             (let ((position (decimal-position string)))
               (cons position (- (length string) position))))))
@@ -248,7 +257,10 @@ Contents of cells that coincide with multicolumn tables are ignored."))
       (multicolumn (cons 0 0)))))
 
 (defun ascii-column-widths (raw-table)
-  "Return a vector of column widths FIXME specify format."
+  "Traverse columns and calculate the column widths, returned as a vector.
+Each column with is either an integer or a cons of two integers, the first the
+column width, the second the width of the first part (before the decimal
+dot)."
   (let+ (((&slots-r/o column-types cells) raw-table)
          ((nrow ncol) (array-dimensions cells))
          (column-widths (map 'vector
@@ -278,17 +290,22 @@ Contents of cells that coincide with multicolumn tables are ignored."))
          (lambda (w)
            (if (listp w)
                (let+ (((left . right) w))
-                 (list (+ left right) left))
-               (list w)))
+                 (cons (+ left right) left))
+               w))
          column-widths)))
 
 (defun ascii-absolute-positions (column-widths separator-width)
-  ""
+  "Return two values: the first a vector containing the absolute positions in
+the format (LIST START END &OPTIONAL OFFSET) where offset is the width of the
+part before the decimal dot; the second value the total width of the table."
   (let* ((total-width separator-width)
          (positions (make-array (length column-widths))))
     (loop for column-width across column-widths
           for index from 0
-          do (let+ (((width &optional offset) column-width)
+          do (let+ (((&values width offset) (if (consp column-width)
+                                                (values (car column-width)
+                                                        (cdr column-width))
+                                                column-width))
                     (end (+ total-width width)))
                (setf (aref positions index)
                      (if offset
@@ -298,6 +315,8 @@ Contents of cells that coincide with multicolumn tables are ignored."))
     (values positions total-width)))
 
 (defun ascii-buffer-write (buffer start end string offset)
+  "Write STRING in BUFFER as if STRING started at (+ START OFFSET) but not
+modifying any other elements except the ones between START and END."
   (let* ((length (length string))
          (start2 (+ start offset))
          (end2 (+ start2 length))
@@ -306,6 +325,8 @@ Contents of cells that coincide with multicolumn tables are ignored."))
              :start2 trim-start)))
 
 (defun ascii-buffer-write-aligned (buffer start end string alignment)
+  "Like ASCII-BUFFER-WRITE, but also accepting alignment keywords and
+automatically aligning string."
   (let ((width (- end start))
         (length (length string)))
     (ascii-buffer-write buffer start end string
@@ -316,15 +337,17 @@ Contents of cells that coincide with multicolumn tables are ignored."))
                               (:right (- width length))
                               (:center (ceiling (- width length) 2)))))))
 
-(defun ascii-rule (absolute-positions total-width rule-specification)
+(defun ascii-rule (absolute-positions total-width rule)
+  "Expand rule into a string."
   (declare (ignore absolute-positions))
-  (etypecase rule-specification
+  (etypecase rule
     (keyword (make-string total-width
-                          :initial-element (ecase rule-specification
+                          :initial-element (ecase rule
                                              ((:top :bottom) #\=)
                                              ((:mid) #\-))))))
 
-(defun ascii-line (absolute-positions total-width column-types row)
+(defun ascii-row (absolute-positions total-width column-types row)
+  "Render ROW in ASCII."
   (let+ ((buffer (make-string total-width :initial-element #\space))
          ((&flet write-aligned (string alignment start-index
                                        &optional (end-index start-index))
@@ -373,8 +396,8 @@ Contents of cells that coincide with multicolumn tables are ignored."))
         (write-rule 0)
         (loop for row-index below (array-dimension cells 0)
               do (fresh)
-                 (dump (ascii-line absolute-positions total-width column-types
-                                   (ao:sub cells row-index)))
+                 (dump (ascii-row absolute-positions total-width column-types
+                                  (ao:sub cells row-index)))
                  (write-rule (1+ row-index))))))
   (:method (filespec-or-stream (table table)
             &key (column-separator *ascii-column-separator*))
