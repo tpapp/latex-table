@@ -32,7 +32,15 @@ aligned according to ALIGNMENT."
 ;;; Column types provide default alignment for cell content (which may be
 ;;; modified by cell wrappers above) and may also influence formatting.
 
-(defstruct (numprint (:constructor numprint))
+(defparameter *digits-before-decimal* 4
+  "Default number of digits before the decimal point.")
+
+(defparameter *digits-after-decimal* 2
+  "Default number of digits after the decimal point.")
+
+(defstruct (numprint
+            (:constructor numprint (digits-after-decimal
+                                    &optional digits-before-decimal)))
   "Numprint n{before}{after} column type."
   (digits-before-decimal *digits-before-decimal* :type (integer 1))
   (digits-after-decimal *digits-after-decimal* :type (integer 0)))
@@ -130,12 +138,6 @@ recycled to give a vector of the desired length."
 
 ;;; formatting floats
 
-(defparameter *digits-before-decimal* 4
-  "Default number of digits before the decimal point.")
-
-(defparameter *digits-after-decimal* 2
-  "Default number of digits after the decimal point.")
-
 (defun format-float (number
                      &key (digits-before-decimal *digits-before-decimal*)
                           (digits-after-decimal *digits-after-decimal*))
@@ -169,8 +171,6 @@ recycled to give a vector of the desired length."
   (:method ((cell real) (numprint numprint))
     (let+ (((&numprint &ign digits-after-decimal) numprint))
       (format-float cell :digits-after-decimal digits-after-decimal)))
-  (:method ((cell real) column-type)
-    (format-float cell))
   (:method (cell column-type)
     (format-content cell)))
 
@@ -472,74 +472,42 @@ automatically aligning string."
 
 
 
-;; (defparameter *t* (latex-table-to-raw *l*))
+;;; convenience functions for constructing tables
 
-;; (write-ascii *standard-output* *t*)
+(defun alignf (cells row-index col-index &optional (alignment :center))
+  "Wrap cell at indexes as aligned."
+  (setf (aref cells row-index col-index)
+        (align alignment (aref cells row-index col-index))))
 
-;; (write-raw-latex *standard-output* *t*)
-;; (write-raw-latex #P"/tmp/foo.table" *t*)
+(defun multicolumnf (cells row-index col-index number
+                     &optional (alignment :center))
+  "Wrap cell at indexes as multicolumn."
+  (setf (aref cells row-index col-index)
+        (multicolumn alignment (aref cells row-index col-index) number)))
 
-;; (defun labeled-matrix (stream matrix column-labels row-labels
-;;                        &key
-;;                          format-options (hlines '(0 :top 1 :mid -1 :bottom)) vlines
-;;                          (corner-cell ""))
-;;   "Output matrix as a simple table, with given row and column labels.
-;; The elements of matrix are expected to be numeric, and formatted using
-;; FORMAT-OPTIONS.  ROW-LABELS and COLUMN-LABELS are sequences."
-;;   (let+ (((nrow ncol) (array-dimensions matrix))
-;; 	 (m (make-array (list (1+ nrow) (1+ ncol))))
-;; 	 (hlines (lines-to-vector (1+ nrow) hlines))
-;; 	 (vlines (lines-to-vector (1+ ncol) vlines))
-;;  	 (coltypes (make-array (1+ ncol) :initial-element :align))
-;;          (format-options (make-format-options format-options ncol))
-;; 	 (row-labels (coerce row-labels 'vector))
-;; 	 (column-labels (coerce column-labels 'vector)))
-;;     (setf (aref coltypes 0) :left)
-;;     ;; corner, row and column labels
-;;     (setf (sub m (cons 1 nil) 0) row-labels
-;;           (sub m 0 (cons 1 nil)) column-labels
-;;           (aref m 0 0) corner-cell
-;;           (aref coltypes 0) :left)
-;;     ;; cells
-;;     (dotimes (i nrow)
-;;       (dotimes (j ncol)
-;; 	(setf (aref m (1+ i) (1+ j))
-;;               (format-value (aref matrix i j) (aref format-options j)))))
-;;     ;; output
-;;     (raw-tabular stream m coltypes vlines hlines)
-;;     (values)))
+(defun vertical-to-cells (cells sequence &key (row-index 0) (col-index 0))
+  "Copy sequence to CELLS at the given indexes, vertically."
+  (loop for element across (coerce sequence 'vector)
+        for row-index from row-index
+        do (setf (aref cells row-index col-index) element)))
 
-;; (defun labeled-vector-horizontal (stream vector labels &key
-;;                                   format-options
-;;                                   (hlines (vector 0 1 0))
-;;                                   vlines)
-;;   "Output vector as a horizontal table."
-;;   (let* ((vector (coerce vector 'vector))
-;;          (labels (coerce labels 'vector))
-;;          (n (length vector)))
-;;     (assert (= n (length labels)))
-;;     (let* ((m (make-array (list 2 n)))
-;;            (vlines (lines-to-vector n vlines))
-;;            (format-options (make-format-options format-options n))
-;;            (coltypes (make-array n :initial-element :align)))
-;;       (setf (sub m 0 t) labels)
-;;       (setf (sub m 1 t) (map 'vector #'format-value vector format-options))
-;;       (raw-tabular stream m coltypes vlines hlines))))
-
-;; (defun labeled-vector-vertical (stream vector labels &key
-;;                                 format-options
-;; 				hlines
-;; 				(vlines (vector 0 1 0)))
-;;   "Output vector as a vertical table."
-;;   (let* ((vector (coerce vector 'vector))
-;; 	 (labels (coerce labels 'vector))
-;; 	 (n (length vector)))
-;;     (assert (= n (length labels)))
-;;     (let* ((m (make-array (list n 2)))
-;; 	   (hlines (lines-to-vector n hlines))
-;;            (format-options (make-format-options format-options nil))
-;; 	   (coltypes (make-array 2 :initial-element :align)))
-;;       (setf (sub m t 0) labels)
-;;       (setf (sub m t 1) (map 'vector (lambda (v) (format-value v format-options))
-;;                              vector))
-;;       (raw-tabular stream m coltypes vlines hlines))))
+(defun labeled-vertical (labels values &key (labels-column :left)
+                          (values-column :right) header?)
+  "Create a table labeling a vector as a vertical column.  When HEADER? is
+set, the top cells are treated as headers and centered, except when HEADER? is
+'MULTICOLUMN, which centers it across the two columns."
+  (let* ((ncol (length values))
+         (cells (make-array (list ncol 2)))
+         (rules '((0 . :top) (-1 . :bottom))))
+    (assert (length= labels ncol))
+    (vertical-to-cells cells labels)
+    (vertical-to-cells cells values :col-index 1)
+    (when header?
+      (if (eq header? 'multicolumn)
+          (multicolumnf cells 0 0 2)
+          (progn
+            (alignf cells 0 0)
+            (alignf cells 0 1)))
+      (push '(1 . :middle) rules))
+    (table cells
+           :rules rules :column-types (vector labels-column values-column))))
