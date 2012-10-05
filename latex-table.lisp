@@ -80,13 +80,53 @@ the rows in CELLS)"))
  - strings,
  - ALIGNED elements with string content,
  - MULTICOLUMN elements with string content,
- - the appropriate number of NILs after MULTICOLUMN, which are skipped."))
+ - the appropriate number of NILs after MULTICOLUMN, which are skipped.
+
+This format is for internal use only, and RAW-TABLE is not exported."))
 
 (defclass table (table-mixin)
   ()
   (:documentation "User-constructed representation of a table.  Cells are
 formatted and their alignment is resolved according to the column types.
 Contents of cells that coincide with multicolumn tables are ignored."))
+
+(defun expand-to-vector (length position-value-pairs
+                         &optional initial-element)
+  "Construct a vector of given LENTH from (position . value) pairs.  Negative
+positions are counted from the end of the vector (eg -1 is for the last
+element), while a position T sets all elements."
+  (aprog1 (make-array length :initial-element initial-element)
+    (loop for (position . value) in position-value-pairs
+          do (etypecase position
+               ((eql t) (fill it value))
+               (integer (setf (aref it (if (minusp position)
+                                           (+ length position)
+                                           position))
+                              value))))))
+
+(defun ensure-vector (length object &optional initial-element)
+  "Return OBJECT as a VECTOR of length, constructing it using EXPAND-TO-VECTOR
+if necessary, using the given INITIAL-ELEMENT.  For internal use only, not
+exported."
+  (aetypecase object
+    (vector (assert (length= it length)) it)
+    (list (expand-to-vector length it initial-element))
+    (t (expand-to-vector length nil object))))
+
+
+(defun table (cells
+                    &key (column-types :right)
+                         (rules '((0 . :top) (-1 . :bottom))))
+  "Construct a table with the given CELLS, column-types and rules.
+
+RULES and COLUMN-TYPES may be lists of pairs, in which case they are passed on
+to EXPAND-TO-VECTOR.  Values which are neither vectors nor lists are
+recycled to give a vector of the desired length."
+  (let+ (((nrow ncol) (array-dimensions cells)))
+    (make-instance 'table
+                   :cells cells
+                   :column-types (ensure-vector ncol column-types :center)
+                   :rules (ensure-vector (1+ nrow) rules nil))))
 
 ;;; formatting floats
 
@@ -133,6 +173,31 @@ Contents of cells that coincide with multicolumn tables are ignored."))
     (format-float cell))
   (:method (cell column-type)
     (format-content cell)))
+
+
+
+(defun table-to-raw (table)
+  "Convert table to the raw format.  Users should not use the raw format as it
+may change without notice, tables should only be constructed using TABLE."
+  (let+ (((&slots-r/o column-types cells rules) table)
+         ((nrow ncol) (array-dimensions cells))
+         (tabular (make-array (list nrow ncol))))
+    (loop for row-index below nrow
+          do (fresh)
+             (loop with multi-left = 0
+                   for col-index below ncol
+                   for column-type across column-types
+                   do (setf (aref tabular row-index col-index)
+                            (if (zerop multi-left)
+                                (let ((cell (aref cells row-index col-index)))
+                                  (when (typep cell 'multicolumn)
+                                    (setf multi-left
+                                          (1- (multicolumn-number cell))))
+                                  (format-cell cell column-type))
+                                (prog1 nil
+                                  (decf multi-left))))))
+    (make-instance 'raw-table :column-types column-types :cells tabular
+                              :rules rules)))
 
 
 
@@ -401,70 +466,8 @@ automatically aligning string."
     (write-ascii filespec-or-stream (table-to-raw table)
                  :column-separator column-separator)))
 
-
-
-;;; convenience functions for table construction
-
-(defun expand-to-vector (length position-value-pairs &optional initial-element)
-  (aprog1 (make-array length :initial-element initial-element)
-    (loop for (position . value) in position-value-pairs
-          do (etypecase position
-               ((eql t) (fill it value))
-               (integer (setf (aref it (if (minusp position)
-                                           (+ length position)
-                                           position))
-                              value))))))
-
-(defun ensure-vector (length object &optional initial-element)
-  (aetypecase object
-    (vector (assert (length= it length)) it)
-    (list (expand-to-vector length it initial-element))
-    (t (expand-to-vector length nil object))))
 
 
-
-(defclass table ()
-  ((column-types :initarg :column-types)
-   (cells :initarg :cells)
-   (rules :initarg :rules)))
-
-(defun table (cells
-                    &key (column-types :right)
-                         (rules '((0 . :top) (-1 . :bottom))))
-  (let+ (((nrow ncol) (array-dimensions cells)))
-    (make-instance 'table
-                   :cells cells
-                   :column-types (ensure-vector ncol column-types :center)
-                   :rules (ensure-vector (1+ nrow) rules nil))))
-
-(defun table-to-raw (table)
-  (let+ (((&slots-r/o column-types cells rules) table)
-         ((nrow ncol) (array-dimensions cells))
-         (tabular (make-array (list nrow ncol))))
-    (loop for row-index below nrow
-          do (fresh)
-             (loop with multi-left = 0
-                   for col-index below ncol
-                   for column-type across column-types
-                   do (setf (aref tabular row-index col-index)
-                            (if (zerop multi-left)
-                                (let ((cell (aref cells row-index col-index)))
-                                  (when (typep cell 'multicolumn)
-                                    (setf multi-left
-                                          (1- (multicolumn-number cell))))
-                                  (format-cell cell column-type))
-                                (prog1 nil
-                                  (decf multi-left))))))
-    (make-instance 'raw-table :column-types column-types :cells tabular
-                              :rules rules)))
-
-(defmethod print-object ((raw-table raw-table) stream)
-  (print-unreadable-object (raw-table stream :type t)
-    (write-ascii stream raw-table :column-separator *ascii-column-separator*)))
-
-(defmethod print-object ((table table) stream)
-  (print-unreadable-object (table stream :type t)
-    (write-ascii stream table :column-separator *ascii-column-separator*)))
 
 ;; (defparameter *t* (latex-table-to-raw *l*))
 
