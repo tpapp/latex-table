@@ -1,5 +1,6 @@
 (defpackage #:latex-table
   (:use #:cl #:alexandria #:anaphora #:let-plus)
+  (:nicknames #:lxt)
   ;; (:shadowing-import-from #:cl-num-utils #:mean #:variance #:median ; also in alexandria
   ;;                         #:sum ; also in iterate
   ;;                         )
