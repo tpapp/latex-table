@@ -1,27 +1,46 @@
 (in-package :latex-table)
 
+;;; formatting floats
+
+(defparameter *digits-before-decimal* 4
+  "Default number of digits before the decimal point.")
+
+(defparameter *digits-after-decimal* 2
+  "Default number of digits after the decimal point.")
+
+(defun format-float (number
+                     &key (digits-before-decimal *digits-before-decimal*)
+                          (digits-after-decimal *digits-after-decimal*))
+  (declare (ignore digits-before-decimal))
+  (format nil "~,vf" digits-after-decimal number))
 
 
 
-;;; Telling latex-table about orientation
+;;; cell wrappers
 
-(defstruct content-mixin content)
+(deftype alignment ()
+  '(member :left :right :center))
 
-(defun content (cell) (content-mixin-content cell))
+(defstruct (aligned (:constructor align (alignment content)))
+  (alignment nil :type alignment)
+  (content))
 
-(defstruct (left (:constructor left (content)) (:include content-mixin)))
+(define-structure-let+ (aligned) alignment content)
 
-(defstruct (right (:constructor right (content)) (:include content-mixin)))
-
-(defstruct (center (:constructor center (content)) (:include content-mixin)))
-
-(deftype justified ()
-  '(or left right center))
-
-(defstruct (multicolumn (:constructor multicolumn (content number))
-                        (:include content-mixin (content nil :type justified)))
+(defstruct (multicolumn (:constructor multicolumn (alignment content number)))
+  (alignment nil :type alignment)
+  (content)
   (number nil :type (integer 1)))
 
+(define-structure-let+ (multicolumn) alignment content number)
+
+;;; column types (besides :left, :right and :center)
+
+(defstruct (numprint (:constructor numprint))
+  (digits-before-decimal *digits-before-decimal* :type (integer 1))
+  (digits-after-decimal *digits-after-decimal* :type (integer 0)))
+
+(define-structure-let+ (numprint) digits-before-decimal digits-after-decimal)
 
 
 
@@ -30,24 +49,34 @@
   (:method ((integer integer))
     (format nil "~d" integer))
   (:method ((real real))
-    (format nil "~f" real))
+    (format-float real))
   (:method ((string string))
     string))
 
-(defgeneric format-cell (cell)
-  (:method (cell)
-    (format-content cell))
-  (:method ((cell left))
-    (left (format-content (content-mixin-content cell))))
-  (:method ((cell right))
-    (right (format-content (content-mixin-content cell))))
-  (:method ((cell center))
-    (center (format-content (content-mixin-content cell))))
-  (:method ((cell multicolumn))
-    (let+ (((&structure-r/o multicolumn- content number) cell))
-      (multicolumn (format-cell content) number))))
+(defgeneric format-cell (cell column-type)
+  (:method ((cell multicolumn) column-type)
+    ;; multicolumn overrides all column types
+    (let+ (((&multicolumn alignment content number) cell))
+      (multicolumn alignment (format-content content) number)))
+  (:method ((cell aligned) column-type)
+    (let+ (((&aligned alignment content) cell)
+           (formatted (format-content content)))
+      (etypecase column-type
+        (alignment (if (eq column-type alignment)
+                       formatted
+                       (align alignment formatted)))
+        (numprint (align alignment formatted)))))
+  (:method ((cell real) (numprint numprint))
+    (let+ (((&numprint &ign digits-after-decimal) numprint))
+      (format-float cell :digits-after-decimal digits-after-decimal)))
+  (:method ((cell real) column-type)
+    (format-float cell))
+  (:method (cell column-type)
+    (format-content cell)))
 
 
+
+;;; writing to a stream
 
 (defparameter *output* *standard-output*)
 
@@ -68,35 +97,236 @@
   (fresh-line *output*))
 
 (defun dump (string)
+  (check-type string string)
   (princ string *output*))
 
-(defun column-type-string (column-type)
-  (ecase column-type
-    (left "l") (right "r") (center "c")))
+
 
-(defun dump-multicolumn (number column-type string)
+;;; writing LaTeX constructs
+
+(defun latex-column-type-string (column-type)
+  (etypecase column-type
+    ((eql :left) "l")
+    ((eql :right) "r")
+    ((eql :center) "c")
+    (numprint (let+ (((&numprint before after) column-type))
+                (format nil "n{~d}{~d}" before after)))))
+
+(defun latex-multicolumn (number column-type string)
   (check-type number (integer 1))
+  (check-type string string)
   (format *output* "\\multicolumn{~d}{~a}{~a}"
           number
-          (column-type-string column-type)
+          (latex-column-type-string column-type)
           string))
 
-(defgeneric dump-cell (column-type cell)
-  (:method (column-type (cell null)))
-  (:method (column-type (cell multicolumn))
-    (let+ (((&structure-r/o multicolumn- content number) cell))
-      (dump-multicolumn number (type-of content)
-                        (content-mixin-content content))))
-  (:method (column-type cell)
-    (let+ ((cell-type (when (typep cell 'content-mixin)
-                        (type-of cell)))
-           (string (if cell-type
-                       (content-mixin-content cell)
-                       cell)))
-      (check-type string string)
-      (if (and cell-type (not (eq cell-type column-type)))
-          (dump-multicolumn 1 cell-type string)
-          (dump string)))))
+(defgeneric latex-cell (cell)
+  (:method ((cell null)))
+  (:method ((cell multicolumn))
+    (let+ (((&multicolumn alignment content number) cell))
+      (latex-multicolumn number alignment content)))
+  (:method ((cell aligned))
+    (let+ (((&aligned alignment content) cell))
+      (latex-multicolumn 1 alignment content)))
+  (:method ((cell string))
+    (dump cell)))
+
+
+
+;;; raw table format
+
+(defclass raw-table ()
+  ((column-types :initarg :column-types)
+   (cells :initarg :cells)
+   (rules :initarg :rules)))
+
+;;; LaTeX output
+
+(defun write-latex (filespec raw-table)
+  (let+ (((&slots-r/o column-types cells) raw-table)
+         ((nrow ncol) (array-dimensions cells)))
+    (with-output (filespec)
+      (fresh)
+      (dump "\\begin{tabular}{")
+      (loop for column-type across column-types
+            do (dump (column-type-string column-type)))
+      (dump "}")
+      (loop for row-index below nrow
+            do (fresh)
+               (loop for col-index below ncol
+                     for column-type across column-types
+                     do (let ((cell (aref cells row-index col-index)))
+                          (when cell
+                            (unless (zerop col-index)
+                              (dump " & "))
+                            (dump-cell cell)))
+                        (when (= col-index (1- ncol))
+                          (dump " \\\\"))))
+      (fresh)
+      (dump "\\end{tabular}")
+      (fresh))))
+
+;;; ASCII output
+
+(defun decimal-position (string)
+  (let ((position (position #\. string)))
+    (aif position it (length string))))
+
+(defun numprint-widths (cell)
+  "Return a list of the length of various parts."
+  (let+ (((&flet width2 (string)
+            (let ((position (decimal-position string)))
+              (cons position (- (length string) position))))))
+    (aetypecase cell
+      (null (cons 0 0))
+      (string (width2 it))
+      (aligned (width2 (aligned-content it)))
+      (multicolumn (cons 0 0)))))
+
+(defun ascii-column-widths (raw-table)
+  "Return a vector of column widths FIXME specify format."
+  (let+ (((&slots-r/o column-types cells) raw-table)
+         ((nrow ncol) (array-dimensions cells))
+         (column-widths (map 'vector
+                             (lambda (column-type)
+                               (etypecase column-type
+                                 (alignment 0)
+                                 (numprint (cons 0 0))))
+                             column-types))
+         ((&flet cell-width (cell)
+            (aetypecase cell
+              (null 0)
+              (string (length it))
+              (aligned (length (aligned-content it)))
+              (multicolumn 0)))))
+    (loop for row-index below nrow
+          do (loop for col-index below ncol
+                   for column-type across column-types
+                   do (let ((cell (aref cells row-index col-index)))
+                        (if (typep column-type 'numprint)
+                            (let+ (((left . right) (numprint-widths cell))
+                                   (column-width (aref column-widths col-index)))
+                              (maxf (car column-width) left)
+                              (maxf (cdr column-width) right))
+                            (maxf (aref column-widths col-index)
+                                  (cell-width cell))))))
+    (map 'vector
+         (lambda (w)
+           (if (listp w)
+               (let+ (((left . right) w))
+                 (list (+ left right) left))
+               (list w)))
+         column-widths)))
+
+(defun ascii-absolute-positions (column-widths separator-width)
+  ""
+  (let* ((total-width separator-width)
+         (positions (make-array (length column-widths))))
+    (loop for column-width across column-widths
+          for index from 0
+          do (let+ (((width &optional offset) column-width)
+                    (end (+ total-width width)))
+               (setf (aref positions index)
+                     (if offset
+                         (list total-width end offset)
+                         (list total-width end))
+                     total-width (+ end separator-width))))
+    (values positions total-width)))
+
+(defun ascii-buffer-write (buffer start end string offset)
+  (let* ((length (length string))
+         (start2 (+ start offset))
+         (end2 (+ start2 length))
+         (trim-start (max 0 (- start start2))))
+    (replace buffer string :start1 (max start start2) :end1 (min end end2)
+             :start2 trim-start)))
+
+(defun ascii-buffer-write-aligned (buffer start end string alignment)
+  (let ((width (- end start))
+        (length (length string)))
+    (ascii-buffer-write buffer start end string
+                        (if (integerp alignment)
+                            alignment
+                            (ecase alignment
+                              (:left 0)
+                              (:right (- width length))
+                              (:center (ceiling (- width length) 2)))))))
+
+(defun ascii-rule (absolute-positions total-width rule-specification)
+  (declare (ignore absolute-positions))
+  (etypecase rule-specification
+    (keyword (make-string total-width
+                          :initial-element (ecase rule-specification
+                                             ((:top :bottom) #\=)
+                                             ((:mid) #\-))))))
+
+(defun ascii-line (absolute-positions total-width column-types row)
+  (let+ ((buffer (make-string total-width :initial-element #\space))
+         ((&flet write-aligned (string alignment start-index
+                                       &optional (end-index start-index))
+            (let* ((start-positions (aref absolute-positions start-index))
+                   (start (first start-positions)))
+              (ascii-buffer-write-aligned buffer start
+                                          (second (aref absolute-positions
+                                                        end-index))
+                                          string
+                                          (if (numberp alignment)
+                                              (- (third start-positions)
+                                                 alignment)
+                                              alignment))))))
+    (loop for col-index from 0
+          for column-type across column-types
+          for cell across row
+          do (aetypecase cell
+               (null)
+               (string (if (typep column-type 'numprint)
+                           (write-aligned cell (car (numprint-widths cell))
+                                          col-index)
+                           (write-aligned cell column-type col-index)))
+               (aligned (let+ (((&aligned alignment content) cell))
+                          (write-aligned content alignment col-index)))
+               (multicolumn (let+ (((&multicolumn alignment content number) cell))
+                              (write-aligned content alignment
+                                             col-index
+                                             (+ col-index number -1))))))
+    buffer))
+
+(defun write-ascii (filespec-or-stream raw-table &key (column-separator "  "))
+  (let+ ((column-widths (ascii-column-widths raw-table))
+         ((&values absolute-positions total-width)
+          (ascii-absolute-positions column-widths (length column-separator)))
+         ((&slots-r/o column-types cells rules) raw-table)
+         ((&flet write-rule (index)
+            (awhen (aref rules index)
+              (fresh)
+              (dump (ascii-rule absolute-positions total-width it))))))
+    (with-output (filespec-or-stream)
+      (write-rule 0)
+      (loop for row-index below (array-dimension cells 0)
+            do (fresh)
+               (dump (ascii-line absolute-positions total-width column-types
+                                  (ao:sub cells row-index)))
+               (write-rule (1+ row-index))))))
+
+
+
+;;; convenience functions for table construction
+
+(defun expand-to-vector (length position-value-pairs &optional initial-element)
+  (aprog1 (make-array length :initial-element initial-element)
+    (loop for (position . value) in position-value-pairs
+          do (etypecase position
+               ((eql t) (fill it value))
+               (integer (setf (aref it (if (minusp position)
+                                           (+ length position)
+                                           position))
+                              value))))))
+
+(defun ensure-vector (length object &optional initial-element)
+  (aetypecase object
+    (vector (assert (length= it length)) it)
+    (list (expand-to-vector length it initial-element))
+    (t (expand-to-vector length nil object))))
 
 
 
@@ -106,18 +336,16 @@
    (rules :initarg :rules)))
 
 (defun latex-table (cells
-                    &key (column-types (make-array (array-dimension cells 1)
-                                                   :initial-element 'center)))
-  (make-instance 'latex-table :cells cells
-                              :column-types column-types))
+                    &key (column-types :right)
+                         (rules '((0 . :top) (-1 . :bottom))))
+  (let+ (((nrow ncol) (array-dimensions cells)))
+    (make-instance 'latex-table
+                   :cells cells
+                   :column-types (ensure-vector ncol column-types :center)
+                   :rules (ensure-vector (1+ nrow) rules nil))))
 
-(defclass latex-tabular ()
-  ((column-types :initarg :column-types)
-   (cells :initarg :cells)
-   (rules :initarg :rules)))
-
-(defun latex-table-to-tabular (latex-table)
-  (let+ (((&slots-r/o column-types cells) latex-table)
+(defun latex-table-to-raw (latex-table)
+  (let+ (((&slots-r/o column-types cells rules) latex-table)
          ((nrow ncol) (array-dimensions cells))
          (tabular (make-array (list nrow ncol))))
     (loop for row-index below nrow
@@ -131,324 +359,23 @@
                                   (when (typep cell 'multicolumn)
                                     (setf multi-left
                                           (1- (multicolumn-number cell))))
-                                  (format-cell cell))
+                                  (format-cell cell column-type))
                                 (prog1 nil
                                   (decf multi-left))))))
-    (make-instance 'latex-tabular :column-types column-types :cells tabular)))
+    (make-instance 'raw-table :column-types column-types :cells tabular
+                              :rules rules)))
 
-(defun write-tabular (filespec latex-tabular)
-  (let+ (((&slots-r/o column-types cells) latex-tabular)
-         ((nrow ncol) (array-dimensions cells)))
-    (with-output (filespec)
-      (fresh)
-      (dump "\\begin{tabular}{")
-      (loop for column-type across column-types
-            do (dump (column-type-string column-type)))
-      (dump "}")
-      (loop for row-index below nrow
-            do (fresh)
-               (loop for col-index below ncol
-                     for column-type across column-types
-                     do  (dump-cell column-type
-                                    (aref cells row-index col-index))
-                        (if (= col-index (1- ncol))
-                            (dump " \\\\")
-                            (dump " & "))))
-      (fresh)
-      (dump "\\end{tabular}")
-      (fresh))))
+;; (defparameter *l* (latex-table
+;;                    (make-array '(3 2)
+;;                                :initial-contents `((1 2)
+;;                                                    (3 ,(align :right 4))
+;;                                                    (,(multicolumn :center 9 2) foo)))))
+;; (defparameter *t* (latex-table-to-raw *l*))
 
-(defparameter *l* (latex-table (make-array '(3 2)
-                                           :initial-contents `((1 2)
-                                                               (3 ,(right 4))
-                                                               (,(multicolumn (center 9) 2) foo)))))
-(defparameter *t* (latex-table-to-tabular *l*))
+;; (write-ascii *standard-output* *t*)
 
-(write-tabular *standard-output* *t*)
-(write-tabular #P "/tmp/foo.table" *l*)
-
-
-
-
-
-
-
-;; exported interface for mc/aligned cells, specification in
-;; raw-tabular can be used directly, should be stable
-
-(defun raw-tabular (stream matrix coltypes vlines hlines &key (position :top)
-                                                              (environment "tabular"))
-  (declare (optimize (debug 3)))
-  "Output matrix in a latex tabular environment (you can also specify another
-environment).
-
-Elements of MATRIX have to be one of the following:
-
- STRING
-   aligned according to coltypes (centered for :align column type)
-
- (:LEFT STRING), (:RIGHT STRING), (:CENTER STRING)
-   flushed left/right, or centered
-
- (:ALIGN STRING STRING)
-    aligned pair
- (:ALIGN STRING)
-    aligned with second part missing
- (:MULTICOLUMN COLS POS STRING)
-   LaTeX multicolumn, subsequent (1- COLS) elements are ignored
-
-The following column types are possible: :LEFT, :RIGHT, :CENTER, :ALIGN.
-Aligned pairs can only be accommodated in a column of type :align.
-
-VLINES and HLINES need to be vectors one element longer than the number of
-columns/rows, respectively.  They can contain small nonnegative integers 0, 1,
-2 and 3 (mapping to the right number of lines), and for vlines, also arbitrary
-strings (eg \"|\", \"@{\\ }\") and characters (#\|, etc).  The latter two are
-not checked for correctness in LaTeX.
-
-HLINES can also contain :TOP, :MID, and :BOTTOM, which are treated as \toprule
-\midrule and \bottomrule.
-
-POSITION corresponds to LaTeX tabular's pos argument for vertical
-position, and can be either :TOP or :BOTTOM."
-  ;; Implementation notes: a column of type :align is actually two
-  ;; columns, separated by @{}.  This is very useful for aligning
-  ;; numbers on the decimal dot and similar arrangements, and thus I
-  ;; feel it is worth dealing with the extra complexity here so that
-  ;; functions calling raw-tabular don't have to.
-  (assert (and (arrayp matrix) (= (array-rank matrix) 2)))
-  (let ((column-positions
-          (iter
-            (with cumulative-position := 1) ; LaTeX counts from 0
-            (for coltype :in-vector coltypes)
-            (when (first-iteration-p)
-              (collect cumulative-position :result-type vector))
-            (incf cumulative-position (if (eq coltype :align) 2 1))
-            (collect cumulative-position :result-type vector))))
-    (labels ((multicolumn (cols pos text)
-               (format stream "\\multicolumn{~a}{~a}{~a}"
-                       cols
-                       (ecase pos
-                         (:left "l") (:right "r") (:center "c"))
-                       text))
-             (vline (type)
-               ;; Return a string for each vline specification.  Currently only 0
-               ;; (no line) and small integers are allowed.
-               (etypecase type
-                 ((integer 0) (ecase type ; number of |'s
-                                (0 "")
-                                (1 "|")
-                                (2 "||")
-                                (3 "|||")))
-                 (character (string type)) ; character to be converted
-                 (string type)))           ; explicit string
-             (process-hline (specification)
-               (let+ (((&flet process-list (list)
-                         (ecase (car list)
-                           ((:top :mid :bottom)
-                            (let+ (((head &optional width) list))
-                              (princ (ecase head
-                                       (:top "\\toprule")
-                                       (:mid "\\midrule")
-                                       (:bottom "\\bottomrule"))
-                                     stream)
-                              (when width
-                                (format stream "[~A]" width))))
-                           (:cmid
-                            (let+ (((a b &key trim width) (cdr specification)))
-                              (princ "\\cmidrule" stream)
-                              (when width
-                                (format stream "[~A]" width))
-                              (when trim
-                                (format stream "(~A)" trim))
-                              (format stream "{~A-~A}"
-                                      (sub column-positions a)
-                                      (let ((b-adj (sub column-positions b)))
-                                        (when (eq (aref coltypes b) :align)
-                                          (incf b-adj))
-                                        b-adj))))))))
-                 (etypecase specification
-                   (fixnum (unless (zerop specification)
-                             (dotimes (i specification)
-                               (princ "\\hline" stream))))
-                   (keyword (process-list (list specification)))
-                   (list (process-list specification))
-                   (vector (map nil #'process-hline specification))))))
-      (let+ (((nrow ncol) (array-dimensions matrix)))
-        (assert (and (vectorp coltypes) (= (length coltypes) ncol)
-                     (vectorp vlines) (= (length vlines) (1+ ncol))
-                     (vectorp hlines) (= (length hlines) (1+ nrow))))
-        ;; header
-        (format stream "\\begin{~a}[~a]{" environment
-                (ecase position
-                  (:top "t")
-                  (:bottom "b")))
-        (iter
-          (for coltype :in-vector coltypes)
-          (for vline :in-vector vlines)
-          (format stream "~a~a"
-                  (vline vline)
-                  (ecase coltype
-                    (:left "l")
-                    (:right "r")
-                    (:center "c")
-                    (:align "r@{}l"))))
-        (format stream "~a}~%" (vline (aref vlines (1- (length vlines)))))
-        ;; matrix
-        (dotimes (i nrow)
-          ;; hline spec, before each row
-          (process-hline (aref hlines i))
-          (princ #\space stream)
-          (let ((multicol-countdown 0))
-            ;; cells in each row
-            (dotimes (j ncol)
-              (if (plusp multicol-countdown)
-                  ;; do not even parse cell, just skip and ignore
-                  (decf multicol-countdown)
-                  ;; parse cell
-                  (let+ ((cell (aref matrix i j))
-                         (coltype (aref coltypes j))
-                         ((&values type first second third)
-                          ;; here we verify correctness of all forms, and
-                          ;; separate type from parameters
-                          (if (atom cell)
-                              ;; an atom has type :any
-                              (values :any cell)
-                              ;; identify various keywords
-                              (let ((type (car cell))
-                                    (params (cdr cell)))
-                                (ecase type
-                                  ;; one of the aligned types
-                                  ((:left :right :center)
-                                   (let+ (((x) params))
-                                     (when (symbolp x)
-                                       (error "~a is a symbol" x))
-                                     (values type x)))
-                                  ;; aligned pair
-                                  (:align
-                                   (let+ (((a b) params))
-                                     (values :align a b)))
-                                  ;; multicolumn
-                                  (:multicolumn
-                                   (let+ (((col pos a) params))
-                                     ;; we skip the next (1- col) cells
-                                     (setf multicol-countdown (1- col))
-                                     ;; calculate the actual number of
-                                     ;; columns seen by LaTeX, taking
-                                     ;; :align columns into account
-                                     (let ((total-col
-                                             (iter
-                                               (for i :from 0 :below col)
-                                               (for coltype :in-vector coltypes :from j)
-                                               (summing (if (eq coltype :align) 2 1)))))
-                                       (values :multicolumn total-col pos a)))))))))
-                    ;; output cell to stream
-                    (ecase coltype
-                      (:align
-                       (ecase type
-                         (:align        ; aligned pair
-                          (format stream "~a & ~a" first second))
-                         (:multicolumn  ; have already accounted for
-					; extra columns above
-                          (multicolumn first second third))
-                         ((:left :right :center)
-                          (multicolumn 2 type first))
-                         ((:any)     ; any defaults to :center in a mc setting
-                          (multicolumn 2 :center first))))
-                      ((:left :right :center)
-                       (ecase type
-                         ((:left :right :center :any)
-                          (if (or (eq type coltype) (eq type :any))
-                              ;; same type as column, or no type
-                              (format stream "~a" first)
-                              ;; different type, has to use multicolumn to align
-                              (multicolumn 1 type first)))
-                         (:multicolumn
-                          (multicolumn first second third))
-                         (:align        ; aligned pair, just center
-                          (multicolumn 1 :center (concatenate 'string first second))))))))
-              ;; close with & or \\
-              (if (= (1- ncol) j)
-                  ;; technically, a nonzero multicol-countdown would lead
-                  ;; to malformed LaTeX code here, but that can never
-                  ;; ("should not") occur
-                  (format stream "\\\\~%")
-                  (when (zerop multicol-countdown)
-                    (format stream " & "))))))
-        ;; hline spec, for last row
-        (process-hline (aref hlines nrow))
-        (princ #\newline stream)
-        ;; closing
-        (format stream "\\end{~a}~%" environment)))))
-
-(defun lines-to-vector (n line-type-pairs)
-  "There are two ways to specify horizontal/vertical lines for tables: one by
-giving a vector which is passed directly to raw-tabular, the other is by
-giving a _flat_ list line/type pairs, which is processed by this function
-before being passed to raw-tabular.  The syntax is the following:
-
-line-type-pairs is (list pos1 type1 pos2 type2 ...)
-
-where pos is either a number for the line position, which can also be
-negative (then it is counted from the end, ie -1 is the last one), or
-you can also give
-
-:default type
-
-and
-
-:offset position
-
-pairs, one of each at maximum, determining the default and the
-offset (a number added to the position).  Offset will only affect
-positive positions.  positions that occur multiple times are not an
-error, only the latest counts.
-
-Vectors are just checked for the correct length and returned.
-
-Examples:
-
- (lines-to-vector 5 '(1 2 -3 1))        => #(0 2 0 1 0 0)
- (lines-to-vector 5 '(:default 1 2 0))  => #(1 1 0 1 1 1)
- (lines-to-vector 5 '(:offset 1 2 1))   => #(0 0 0 1 0 0)
-"
-  (cond
-    ((vectorp line-type-pairs)
-     (if (= (1+ n) (length line-type-pairs))
-	 line-type-pairs
-	 (error "vector does not have the correct length")))
-    ((and (listp line-type-pairs) (list-length line-type-pairs))
-     (let (default	offset)
-       ;; sweep for offset and default
-       (iter
-	 (for (line type) :on line-type-pairs :by #'cddr)
-	 (case line
-	   (:default
-	    (if default
-		(error "default is set twice")
-		(setf default type)))
-	   (:offset
-	    (if offset
-		(error "offset is set twice")
-		(setf offset type)))))
-       ;; if not found, set default values
-       (unless default (setf default 0))
-       (unless offset (setf offset 0))
-       ;; sweep again for pairs
-       (let ((lines (make-array (1+ n) :element-type t :initial-element default)))
-	 ;; set line & type pairs, extract default
-	 (iter
-	   (for (line type) :on line-type-pairs :by #'cddr)
-	   (cond
-	     ((null type) (error "odd number of elements or nil in line-type-pairs"))
-	     ((find line '(:default :offset))) ; silently ignore
-	     (t (setf (aref lines (if (minusp line)
-				      (+ n 1 line)
-				      (+ line offset)))
-		      type))))
-	 ;; return lines
-	 lines)))
-    (t (error "line-type-pairs has to be a vector or a proper list"))))
+;; (write-raw-latex *standard-output* *t*)
+;; (write-raw-latex #P"/tmp/foo.table" *t*)
 
 (defun labeled-matrix (stream matrix column-labels row-labels
                        &key
