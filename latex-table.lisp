@@ -176,9 +176,12 @@ recycled to give a vector of the desired length."
 
 
 
+;;; table conversion to `raw' format
+
 (defun table-to-raw (table)
-  "Convert table to the raw format.  Users should not use the raw format as it
-may change without notice, tables should only be constructed using TABLE."
+  "Convert table to the `raw' format.  Users should not use the raw format as it
+may change without notice, tables should only be constructed using TABLE.  Not
+exported, for internal use only."
   (let+ (((&slots-r/o column-types cells rules) table)
          ((nrow ncol) (array-dimensions cells))
          (tabular (make-array (list nrow ncol))))
