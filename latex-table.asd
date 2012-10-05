@@ -7,4 +7,4 @@
 	       ;; (:file "formatting")
 	       (:file "latex-table")
                )
-  :depends-on (#:alexandria #:anaphora #:array-operations #:let-plus))
+  :depends-on (#:alexandria #:anaphora #:let-plus))

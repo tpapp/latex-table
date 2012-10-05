@@ -345,7 +345,7 @@ automatically aligning string."
                                              ((:top :bottom) #\=)
                                              ((:middle) #\-))))))
 
-(defun ascii-row (absolute-positions total-width column-types row)
+(defun ascii-row (absolute-positions total-width column-types cells row-index)
   "Render ROW in ASCII."
   (let+ ((buffer (make-string total-width :initial-element #\space))
          ((&flet write-aligned (string alignment start-index
@@ -362,16 +362,14 @@ automatically aligning string."
                                               alignment))))))
     (loop for col-index from 0
           for column-type across column-types
-          for cell across row
-          do (aetypecase cell
+          do (aetypecase (aref cells row-index col-index)
                (null)
                (string (if (typep column-type 'numprint)
-                           (write-aligned cell (car (numprint-widths cell))
-                                          col-index)
-                           (write-aligned cell column-type col-index)))
-               (aligned (let+ (((&aligned alignment content) cell))
+                           (write-aligned it (car (numprint-widths it)) col-index)
+                           (write-aligned it column-type col-index)))
+               (aligned (let+ (((&aligned alignment content) it))
                           (write-aligned content alignment col-index)))
-               (multicolumn (let+ (((&multicolumn alignment content number) cell))
+               (multicolumn (let+ (((&multicolumn alignment content number) it))
                               (write-aligned content alignment
                                              col-index
                                              (+ col-index number -1))))))
@@ -396,7 +394,7 @@ automatically aligning string."
         (loop for row-index below (array-dimension cells 0)
               do (fresh)
                  (dump (ascii-row absolute-positions total-width column-types
-                                  (ao:sub cells row-index)))
+                                  cells row-index))
                  (write-rule (1+ row-index))))))
   (:method (filespec-or-stream (table table)
             &key (column-separator *ascii-column-separator*))
