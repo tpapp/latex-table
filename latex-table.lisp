@@ -49,7 +49,6 @@ aligned according to ALIGNMENT."
   "Horizontal rule types recognized by tables."
   '(member :top :bottom :middle))
 
-
 ;;; table representations
 
 (defclass table-mixin ()
@@ -344,7 +343,7 @@ automatically aligning string."
     (keyword (make-string total-width
                           :initial-element (ecase rule
                                              ((:top :bottom) #\=)
-                                             ((:mid) #\-))))))
+                                             ((:middle) #\-))))))
 
 (defun ascii-row (absolute-positions total-width column-types row)
   "Render ROW in ASCII."
