@@ -144,29 +144,32 @@
 
 ;;; LaTeX output
 
-(defun write-latex (filespec raw-table)
-  (let+ (((&slots-r/o column-types cells) raw-table)
-         ((nrow ncol) (array-dimensions cells)))
-    (with-output (filespec)
-      (fresh)
-      (dump "\\begin{tabular}{")
-      (loop for column-type across column-types
-            do (dump (latex-column-type-string column-type)))
-      (dump "}")
-      (loop for row-index below nrow
-            do (fresh)
-               (loop for col-index below ncol
-                     for column-type across column-types
-                     do (let ((cell (aref cells row-index col-index)))
-                          (when cell
-                            (unless (zerop col-index)
-                              (dump " & "))
-                            (latex-cell cell)))
-                        (when (= col-index (1- ncol))
-                          (dump " \\\\"))))
-      (fresh)
-      (dump "\\end{tabular}")
-      (fresh))))
+(defgeneric write-latex (filespec-or-stream raw-table)
+  (:method (filespec-or-stream (raw-table raw-table))
+    (let+ (((&slots-r/o column-types cells) raw-table)
+           ((nrow ncol) (array-dimensions cells)))
+      (with-output (filespec-or-stream)
+        (fresh)
+        (dump "\\begin{tabular}{")
+        (loop for column-type across column-types
+              do (dump (latex-column-type-string column-type)))
+        (dump "}")
+        (loop for row-index below nrow
+              do (fresh)
+                 (loop for col-index below ncol
+                       for column-type across column-types
+                       do (let ((cell (aref cells row-index col-index)))
+                            (when cell
+                              (unless (zerop col-index)
+                                (dump " & "))
+                              (latex-cell cell)))
+                          (when (= col-index (1- ncol))
+                            (dump " \\\\"))))
+        (fresh)
+        (dump "\\end{tabular}")
+        (fresh))))
+  (:method (filespec-or-stream (table table))
+    (write-latex filespec-or-stream (table-to-raw table))))
 
 ;;; ASCII output
 
@@ -293,22 +296,31 @@
                                              (+ col-index number -1))))))
     buffer))
 
-(defun write-ascii (filespec-or-stream raw-table &key (column-separator "  "))
-  (let+ ((column-widths (ascii-column-widths raw-table))
-         ((&values absolute-positions total-width)
-          (ascii-absolute-positions column-widths (length column-separator)))
-         ((&slots-r/o column-types cells rules) raw-table)
-         ((&flet write-rule (index)
-            (awhen (aref rules index)
-              (fresh)
-              (dump (ascii-rule absolute-positions total-width it))))))
-    (with-output (filespec-or-stream)
-      (write-rule 0)
-      (loop for row-index below (array-dimension cells 0)
-            do (fresh)
-               (dump (ascii-line absolute-positions total-width column-types
-                                  (ao:sub cells row-index)))
-               (write-rule (1+ row-index))))))
+(defvar *ascii-column-separator* "  "
+  "The default separator for columns in ASCII output.")
+
+(defgeneric write-ascii (filespec-or-stream table &key column-separator)
+  (:method (filespec-or-stream (raw-table raw-table)
+            &key (column-separator *ascii-column-separator*))
+    (let+ ((column-widths (ascii-column-widths raw-table))
+           ((&values absolute-positions total-width)
+            (ascii-absolute-positions column-widths (length column-separator)))
+           ((&slots-r/o column-types cells rules) raw-table)
+           ((&flet write-rule (index)
+              (awhen (aref rules index)
+                (fresh)
+                (dump (ascii-rule absolute-positions total-width it))))))
+      (with-output (filespec-or-stream)
+        (write-rule 0)
+        (loop for row-index below (array-dimension cells 0)
+              do (fresh)
+                 (dump (ascii-line absolute-positions total-width column-types
+                                   (ao:sub cells row-index)))
+                 (write-rule (1+ row-index))))))
+  (:method (filespec-or-stream (table table)
+            &key (column-separator *ascii-column-separator*))
+    (write-ascii filespec-or-stream (table-to-raw table)
+                 :column-separator column-separator)))
 
 
 
@@ -341,13 +353,13 @@
                     &key (column-types :right)
                          (rules '((0 . :top) (-1 . :bottom))))
   (let+ (((nrow ncol) (array-dimensions cells)))
-    (make-instance 'latex-table
+    (make-instance 'table
                    :cells cells
                    :column-types (ensure-vector ncol column-types :center)
                    :rules (ensure-vector (1+ nrow) rules nil))))
 
-(defun table-to-raw (latex-table)
-  (let+ (((&slots-r/o column-types cells rules) latex-table)
+(defun table-to-raw (table)
+  (let+ (((&slots-r/o column-types cells rules) table)
          ((nrow ncol) (array-dimensions cells))
          (tabular (make-array (list nrow ncol))))
     (loop for row-index below nrow
@@ -367,11 +379,14 @@
     (make-instance 'raw-table :column-types column-types :cells tabular
                               :rules rules)))
 
-;; (defparameter *l* (latex-table
-;;                    (make-array '(3 2)
-;;                                :initial-contents `((1 2)
-;;                                                    (3 ,(align :right 4))
-;;                                                    (,(multicolumn :center 9 2) foo)))))
+(defmethod print-object ((raw-table raw-table) stream)
+  (print-unreadable-object (raw-table stream :type t)
+    (write-ascii stream raw-table :column-separator *ascii-column-separator*)))
+
+(defmethod print-object ((table table) stream)
+  (print-unreadable-object (table stream :type t)
+    (write-ascii stream table :column-separator *ascii-column-separator*)))
+
 ;; (defparameter *t* (latex-table-to-raw *l*))
 
 ;; (write-ascii *standard-output* *t*)
