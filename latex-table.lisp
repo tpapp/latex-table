@@ -2,6 +2,93 @@
 
 (in-package #:latex-table)
 
+;;; cell wrappers
+;;;
+;;; Cell wrappers modify the placement of cell content.  They do not affect
+;;; formatting.
+
+(deftype alignment ()
+  "Allowed types of alignment."
+  '(member :left :right :center))
+
+(defstruct (aligned (:constructor align (alignment content)))
+  "Wrapper structure for aligned content."
+  (alignment nil :type alignment)
+  (content))
+
+(define-structure-let+ (aligned) alignment content)
+
+(defstruct (multicolumn (:constructor multicolumn (alignment content number)))
+  "Wrapper structure for multicolumn content, spanning NUMBER of columns,
+aligned according to ALIGNMENT."
+  (alignment nil :type alignment)
+  (content)
+  (number nil :type (integer 1)))
+
+(define-structure-let+ (multicolumn) alignment content number)
+
+;;; column types
+;;;
+;;; Column types provide default alignment for cell content (which may be
+;;; modified by cell wrappers above) and may also influence formatting.
+
+(defstruct (numprint (:constructor numprint))
+  "Numprint n{before}{after} column type."
+  (digits-before-decimal *digits-before-decimal* :type (integer 1))
+  (digits-after-decimal *digits-after-decimal* :type (integer 0)))
+
+(define-structure-let+ (numprint) digits-before-decimal digits-after-decimal)
+
+(deftype column-type ()
+  "Column types recognized by tables."
+  `(or numprint (member :left :right :center)))
+
+;;; rules
+
+(deftype rule ()
+  "Horizontal rule types recognized by tables."
+  '(member :top :bottom :middle))
+
+
+;;; table representations
+
+(defclass table-mixin ()
+  ((cells :initarg :cells :type (array * (* *)))
+   (column-types :initarg :column-types :type vector)
+   (rules :initarg :rules :type vector))
+  (:documentation "Mixin class for table of values, stored in CELLS.
+COLUMN-TYPES specify the column types, and RULES the rules (you one more than
+the rows in CELLS)"))
+
+(defun check-table-consistency (cells column-types rules)
+  "Check that the dimensions of the table definition are consistent."
+  (check-type cells (array * (* *)))
+  (check-type column-types vector)
+  (check-type rules vector)
+  (let+ (((nrow ncol) (array-dimensions cells)))
+    (assert (length= column-types ncol))
+    (assert (length= rules (1+ nrow)))
+    ;; FIXME check types of elements in these two vectors
+    ))
+
+(defmethod initialize-instance :after
+    ((table table-mixin) &key cells column-types rules &allow-other-keys)
+  (check-table-consistency cells column-types rules))
+
+(defclass raw-table (table-mixin)
+  ()
+  (:documentation "Internal representation of a table.  CELLS may only contain
+ - strings,
+ - ALIGNED elements with string content,
+ - MULTICOLUMN elements with string content,
+ - the appropriate number of NILs after MULTICOLUMN, which are skipped."))
+
+(defclass table (table-mixin)
+  ()
+  (:documentation "User-constructed representation of a table.  Cells are
+formatted and their alignment is resolved according to the column types.
+Contents of cells that coincide with multicolumn tables are ignored."))
+
 ;;; formatting floats
 
 (defparameter *digits-before-decimal* 4
@@ -18,36 +105,8 @@
 
 
 
-;;; cell wrappers
-
-(deftype alignment ()
-  '(member :left :right :center))
-
-(defstruct (aligned (:constructor align (alignment content)))
-  (alignment nil :type alignment)
-  (content))
-
-(define-structure-let+ (aligned) alignment content)
-
-(defstruct (multicolumn (:constructor multicolumn (alignment content number)))
-  (alignment nil :type alignment)
-  (content)
-  (number nil :type (integer 1)))
-
-(define-structure-let+ (multicolumn) alignment content number)
-
-;;; column types (besides :left, :right and :center)
-
-(defstruct (numprint (:constructor numprint))
-  (digits-before-decimal *digits-before-decimal* :type (integer 1))
-  (digits-after-decimal *digits-after-decimal* :type (integer 0)))
-
-(define-structure-let+ (numprint) digits-before-decimal digits-after-decimal)
-
-
-
 (defgeneric format-content (content)
-  (:documentation "Return a string that is understood by LaTeX.")
+  (:documentation "Return a string.")
   (:method ((integer integer))
     (format nil "~d" integer))
   (:method ((real real))
@@ -104,7 +163,14 @@
 
 
 
-;;; writing LaTeX constructs
+;;; LaTeX output
+;;;
+;;; Produces LaTeX code that relies on standard LaTeX2e + dcolumn (if rules
+;;; are used, they are enabled by default) and numprint (for columns of the
+;;; numprint type).  The user should load these in LaTeX when including the
+;;; tables.
+
+;;; primitive LaTeX constructs
 
 (defun latex-column-type-string (column-type)
   (etypecase column-type
@@ -134,13 +200,6 @@
     (dump cell)))
 
 
-
-;;; raw table format
-
-(defclass raw-table ()
-  ((column-types :initarg :column-types)
-   (cells :initarg :cells)
-   (rules :initarg :rules)))
 
 ;;; LaTeX output
 
