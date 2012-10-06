@@ -37,4 +37,5 @@
    #:format-content
    #:write-latex
    #:write-ascii
-   #:labeled-vertical))
+   #:labeled-vertical
+   #:*ascii-column-separator*))
