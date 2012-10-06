@@ -337,7 +337,7 @@ the length of each as a cons."
     (aetypecase cell
       (null (cons 0 0))
       (string (width2 it))
-      (aligned (width2 (aligned-content it)))
+      (aligned (width2 (aligned-content it))) ; FIXME this is incorrect, alignment happens after
       (multicolumn (cons 0 0)))))
 
 (defun ascii-column-widths (raw-table)
