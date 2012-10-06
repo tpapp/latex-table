@@ -121,16 +121,31 @@ exported."
     (list (expand-to-vector length it initial-element))
     (t (expand-to-vector length nil object))))
 
+(defun ensure-matrix (object)
+  "Return OBJECT as a 2D array if possible, otherwise signal an error."
+  (flet ((error% ()
+           (error "Could not convert ~A to a 2D array." object)))
+    (atypecase object
+      ((array * (* *)) it)
+      (sequence (let ((first (elt object 0)))
+                  (if (typep first 'sequence)
+                      (make-array (list (length it) (length first))
+                                  :initial-contents it)
+                      (error%))))
+      (t (error%)))))
 
-(defun table (cells
-                    &key (column-types :right)
+
+(defun table (cells &key (column-types :right)
                          (rules '((0 . :top) (-1 . :bottom))))
-  "Construct a table with the given CELLS, column-types and rules.
+  "Construct a table with the given CELLS, COLUMN-TYPES and RULES.
+
+CELLS may be a 2D array or a sequence of sequences, converted to a 2D array.
 
 RULES and COLUMN-TYPES may be lists of pairs, in which case they are passed on
-to EXPAND-TO-VECTOR.  Values which are neither vectors nor lists are
-recycled to give a vector of the desired length."
-  (let+ (((nrow ncol) (array-dimensions cells)))
+to EXPAND-TO-VECTOR.  Values which are neither vectors nor lists are recycled
+to give a vector of the desired length."
+  (let+ ((cells (ensure-matrix cells))
+         ((nrow ncol) (array-dimensions cells)))
     (make-instance 'table
                    :cells cells
                    :column-types (ensure-vector ncol column-types :center)
@@ -153,7 +168,9 @@ recycled to give a vector of the desired length."
   (:method ((real real))
     (format-float real))
   (:method ((string string))
-    string))
+    string)
+  (:method ((symbol symbol))
+    (symbol-name symbol)))
 
 (defgeneric format-cell (cell column-type)
   (:method ((cell multicolumn) column-type)
