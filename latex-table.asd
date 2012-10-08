@@ -4,7 +4,5 @@
   :license "Boost Software License, Version 1.0."
   :serial t
   :components ((:file "package")
-	       ;; (:file "formatting")
-	       (:file "latex-table")
-               )
+	       (:file "latex-table"))
   :depends-on (#:alexandria #:anaphora #:let-plus))
