@@ -430,7 +430,7 @@ automatically aligning string."
                                              ((:top :bottom) #\=)
                                              ((:middle) #\-))))))
 
-(defun ascii-row (absolute-positions total-width column-types cells row-index)
+(defun ascii-row (absolute-positions total-width column-types row)
   "Render ROW in ASCII."
   (let+ ((buffer (make-string total-width :initial-element #\space))
          ((&flet write-aligned (string alignment start-index
@@ -446,8 +446,9 @@ automatically aligning string."
                                                  alignment)
                                               alignment))))))
     (loop for col-index from 0
+          for element across row
           for column-type across column-types
-          do (aetypecase (aref cells row-index col-index)
+          do (aetypecase element
                (null)
                (string (if (typep column-type 'numprint)
                            (write-aligned it (car (numprint-widths it)) col-index)
@@ -477,9 +478,10 @@ automatically aligning string."
       (with-output (filespec-or-stream)
         (write-rule 0)
         (loop for row-index below (array-dimension cells 0)
+              for row across (ao:split cells 1)
               do (fresh)
                  (dump (ascii-row absolute-positions total-width column-types
-                                  cells row-index))
+                                  row))
                  (write-rule (1+ row-index))))))
   (:method (filespec-or-stream (table table)
             &key (column-separator *ascii-column-separator*))
@@ -502,23 +504,13 @@ automatically aligning string."
   (setf (aref cells row-index col-index)
         (multicolumn alignment (aref cells row-index col-index) number)))
 
-(defun vertical-to-cells (cells sequence &key (row-index 0) (col-index 0))
-  "Copy sequence to CELLS at the given indexes, vertically."
-  (loop for element across (coerce sequence 'vector)
-        for row-index from row-index
-        do (setf (aref cells row-index col-index) element)))
-
 (defun labeled-vertical (labels values &key (labels-column :left)
                           (values-column :right) header?)
   "Create a table labeling a vector as a vertical column.  When HEADER? is
 set, the top cells are treated as headers and centered, except when HEADER? is
 'MULTICOLUMN, which centers it across the two columns."
-  (let* ((ncol (length values))
-         (cells (make-array (list ncol 2)))
+  (let* ((cells (ao:stack 1 (ao:reshape labels '(t 1)) (ao:reshape values '(t 1))))
          (rules '((0 . :top) (-1 . :bottom))))
-    (assert (length= labels ncol))
-    (vertical-to-cells cells labels)
-    (vertical-to-cells cells values :col-index 1)
     (when header?
       (if (eq header? 'multicolumn)
           (multicolumnf cells 0 0 2)

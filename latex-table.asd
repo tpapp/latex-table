@@ -5,4 +5,4 @@
   :serial t
   :components ((:file "package")
 	       (:file "latex-table"))
-  :depends-on (#:alexandria #:anaphora #:let-plus))
+  :depends-on (#:alexandria #:anaphora #:array-operations #:let-plus))
