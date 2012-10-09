@@ -163,6 +163,8 @@ to give a vector of the desired length."
 
 (defgeneric format-content (content)
   (:documentation "Return a string.")
+  (:method ((content null))
+    "")
   (:method ((integer integer))
     (format nil "~d" integer))
   (:method ((real real))
@@ -487,6 +489,10 @@ automatically aligning string."
             &key (column-separator *ascii-column-separator*))
     (write-ascii filespec-or-stream (table-to-raw table)
                  :column-separator column-separator)))
+
+(defmethod print-object ((table table-mixin) stream)
+  (print-unreadable-object (table stream :type t)
+    (write-ascii stream table :column-separator *ascii-column-separator*)))
 
 
 
