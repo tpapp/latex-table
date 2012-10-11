@@ -293,11 +293,22 @@ Filespecs are opened, streams are used as is."
   (:method ((cell string))
     (dump cell)))
 
+(defun latex-rule (rule)
+  "Return LaTeX code representing rule as a string."
+  (ecase rule
+    (:top "\\toprule")
+    (:bottom "\\bottomrule")
+    (:middle "\\midrule")))
+
 (defgeneric write-latex (filespec-or-stream table)
   (:documentation "Write TABLE to FILESPEC-OR-STREAM for LaTeX.")
   (:method (filespec-or-stream (raw-table raw-table))
-    (let+ (((&slots-r/o column-types cells) raw-table)
-           ((nrow ncol) (array-dimensions cells)))
+    (let+ (((&slots-r/o column-types cells rules) raw-table)
+           ((nrow ncol) (array-dimensions cells))
+           ((&flet dump-rule (row-index)
+              (awhen (aref rules row-index)
+                (dump (latex-rule it))
+                (fresh)))))
       (with-output (filespec-or-stream)
         (fresh)
         (dump "\\begin{tabular}{")
@@ -306,6 +317,7 @@ Filespecs are opened, streams are used as is."
         (dump "}")
         (loop for row-index below nrow
               do (fresh)
+                 (dump-rule row-index)
                  (loop for col-index below ncol
                        for column-type across column-types
                        do (let ((cell (aref cells row-index col-index)))
@@ -316,6 +328,7 @@ Filespecs are opened, streams are used as is."
                           (when (= col-index (1- ncol))
                             (dump " \\\\"))))
         (fresh)
+        (dump-rule nrow)
         (dump "\\end{tabular}")
         (fresh))))
   (:method (filespec-or-stream (table table))
