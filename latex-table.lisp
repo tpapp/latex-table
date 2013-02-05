@@ -493,7 +493,7 @@ automatically aligning string."
       (with-output (filespec-or-stream)
         (write-rule 0)
         (loop for row-index below (array-dimension cells 0)
-              for row across (ao:split cells 1)
+              for row across (aops:split cells 1)
               do (fresh)
                  (dump (ascii-row absolute-positions total-width column-types
                                   row))
@@ -528,7 +528,9 @@ automatically aligning string."
   "Create a table labeling a vector as a vertical column.  When HEADER? is
 set, the top cells are treated as headers and centered, except when HEADER? is
 'MULTICOLUMN, which centers it across the two columns."
-  (let* ((cells (ao:stack 1 (ao:reshape labels '(t 1)) (ao:reshape values '(t 1))))
+  (let* ((cells (aops:stack 1
+                            (aops:reshape labels '(t 1))
+                            (aops:reshape values '(t 1))))
          (rules '((0 . :top) (-1 . :bottom))))
     (when header?
       (if (eq header? 'multicolumn)
